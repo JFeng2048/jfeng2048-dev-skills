@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "description": "目标项目包管理与启动方式：默认使用 uv；requirements.txt 仅作兼容导出",
+  "primary": "uv",
+  "files": {
+    "pyproject.toml": {
+      "required": true,
+      "template": "resources/templates/project_structure/pyproject.toml",
+      "notes": [
+        "生成时替换 {{project_name}}（PEP 503 规范名，下划线改为连字符）与 {{project_description}}",
+        "运行时依赖写在 [project].dependencies",
+        "测试依赖写在 [dependency-groups].dev",
+        "应用型项目保持 tool.uv.package = false"
+      ]
+    },
+    ".python-version": {
+      "required": true,
+      "template": "resources/templates/project_structure/.python-version",
+      "notes": [
+        "模板内容为占位符 {{python_version}}，生成时必须替换",
+        "生成时优先取本机可用的最新稳定版 CPython：uv python list（或 uv python find）后选版本号最高者，不要固定写 3.12",
+        "pyproject.toml 的 requires-python 使用同一版本（>={{python_version}}），保持两处一致",
+        "用户明确要求兼容旧版本时才降级，并在 README 的 Assumptions 中说明"
+      ]
+    },
+    "requirements.txt": {
+      "required": true,
+      "template": "resources/templates/project_structure/requirements.txt",
+      "notes": [
+        "与 pyproject.toml 运行时依赖保持一致，供未安装 uv 时兼容使用",
+        "文档与「下一步」指令优先写 uv，其次才写 pip"
+      ]
+    }
+  },
+  "commands": {
+    "install": "uv sync",
+    "install_with_dev": "uv sync",
+    "start_reload": "uv run uvicorn start:app --reload",
+    "start_script": "uv run python start.py",
+    "test": "uv run pytest -c tests/pytest.ini -v",
+    "add_runtime_dep": "uv add <package>",
+    "add_dev_dep": "uv add --dev <package>",
+    "fallback_pip_install": "pip install -r requirements.txt",
+    "fallback_pip_start": "uvicorn start:app --reload"
+  },
+  "readme_quickstart": [
+    "确保已安装 uv：https://docs.astral.sh/uv/",
+    "uv sync",
+    "cp .env.example .env 并配置 DATABASE_URL",
+    "uv run uvicorn start:app --reload  或  uv run python start.py"
+  ]
+}

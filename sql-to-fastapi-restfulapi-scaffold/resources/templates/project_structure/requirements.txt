@@ -1,0 +1,28 @@
+# =============================================================================
+# 由 SQL-to-FastAPI-Scaffold 生成（依赖与 pyproject.toml 严格对齐）
+# 包管理与启动推荐使用 uv：uv sync
+# 若使用 pip：pip install -r requirements.txt
+#   - 运行时依赖对应 pyproject [project].dependencies
+#   - 开发/测试依赖对应 pyproject [dependency-groups].dev
+# 说明：redis / email-validator / alembic / tenacity / python-json-logger /
+#       PyYAML / ruff 等并非启动必需，已从清单移除，避免安装不必要依赖。
+# =============================================================================
+
+# --- 运行时依赖 ---
+fastapi>=0.115.0
+uvicorn[standard]>=0.23.0
+sqlalchemy[asyncio]>=2.0.0
+aiomysql>=0.2.0
+cryptography>=42.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-multipart>=0.0.6
+PyJWT>=2.8.0
+passlib[bcrypt]>=1.7.4
+python-dotenv>=1.0.0
+
+# --- 开发 / 测试依赖（对应 pyproject [dependency-groups].dev）---
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0
+aiosqlite>=0.20.0

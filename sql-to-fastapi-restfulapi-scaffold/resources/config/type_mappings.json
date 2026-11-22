@@ -1,0 +1,128 @@
+{
+  "version": "1.0.0",
+  "description": "SQL类型到SQLAlchemy和Pydantic的类型映射配置",
+  "type_mappings": [
+    {
+      "sql_types": ["VARCHAR", "VARCHAR2", "CHAR"],
+      "sqlalchemy_type": "String",
+      "pydantic_type": "str",
+      "requires_length": true,
+      "default_length": 255
+    },
+    {
+      "sql_types": ["INT", "INTEGER", "SMALLINT", "TINYINT"],
+      "sqlalchemy_type": "Integer",
+      "pydantic_type": "int",
+      "requires_length": false
+    },
+    {
+      "sql_types": ["BIGINT"],
+      "sqlalchemy_type": "BigInteger",
+      "pydantic_type": "int",
+      "requires_length": false
+    },
+    {
+      "sql_types": ["BOOLEAN", "BOOL", "TINYINT(1)"],
+      "sqlalchemy_type": "Boolean",
+      "pydantic_type": "bool",
+      "requires_length": false
+    },
+    {
+      "sql_types": ["DATETIME", "TIMESTAMP"],
+      "sqlalchemy_type": "DateTime",
+      "pydantic_type": "datetime",
+      "requires_length": false,
+      "import_required": {
+        "pydantic": "from datetime import datetime"
+      }
+    },
+    {
+      "sql_types": ["DATE"],
+      "sqlalchemy_type": "Date",
+      "pydantic_type": "date",
+      "requires_length": false,
+      "import_required": {
+        "pydantic": "from datetime import date"
+      }
+    },
+    {
+      "sql_types": ["TIME"],
+      "sqlalchemy_type": "Time",
+      "pydantic_type": "time",
+      "requires_length": false,
+      "import_required": {
+        "pydantic": "from datetime import time"
+      }
+    },
+    {
+      "sql_types": ["TEXT", "LONGTEXT", "MEDIUMTEXT"],
+      "sqlalchemy_type": "Text",
+      "pydantic_type": "str",
+      "requires_length": false
+    },
+    {
+      "sql_types": ["DECIMAL", "NUMERIC"],
+      "sqlalchemy_type": "Numeric",
+      "pydantic_type": "Decimal",
+      "requires_length": true,
+      "import_required": {
+        "pydantic": "from decimal import Decimal"
+      }
+    },
+    {
+      "sql_types": ["FLOAT", "DOUBLE", "DOUBLE PRECISION"],
+      "sqlalchemy_type": "Float",
+      "pydantic_type": "float",
+      "requires_length": false
+    },
+    {
+      "sql_types": ["JSON", "JSONB"],
+      "sqlalchemy_type": "JSON",
+      "pydantic_type": "dict",
+      "requires_length": false
+    }
+  ],
+  "field_validators": [
+    {
+      "pattern": "phone",
+      "type": "phone",
+      "description": "中国手机号格式验证"
+    },
+    {
+      "pattern": "email",
+      "type": "email",
+      "description": "邮箱格式验证"
+    },
+    {
+      "pattern": "age",
+      "type": "age",
+      "description": "年龄范围验证",
+      "constraints": {
+        "ge": 0,
+        "le": 150
+      }
+    },
+    {
+      "pattern": "gender|sex",
+      "type": "gender",
+      "description": "性别枚举验证"
+    }
+  ],
+  "sensitive_fields": [
+    {
+      "pattern": "phone|mobile|tel",
+      "min_length": 11,
+      "masking": "prefix3****suffix4"
+    },
+    {
+      "pattern": "email",
+      "min_length": 6,
+      "masking": "prefix3****suffix4"
+    },
+    {
+      "pattern": "id_card|idcard|identity",
+      "min_length": 15,
+      "masking": "prefix3****suffix4"
+    }
+  ]
+}

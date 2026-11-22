@@ -1,0 +1,48 @@
+# 由 SQL-to-FastAPI-Scaffold 生成。
+# 包管理与启动推荐使用 uv（https://github.com/astral-sh/uv）
+#
+# 占位符（生成时替换）：
+#   {{project_name}}         — 项目名（PEP 503：建议用连字符，如 fastapi_project_starter）
+#   {{project_description}}  — 项目描述
+#   {{python_version}}       — 生成时探测到的最新稳定版 CPython（如 3.13 / 3.14），不要固定写 3.12
+
+[project]
+name = "{{project_name}}"
+version = "1.0.0"
+description = "{{project_description}}"
+readme = "README.md"
+requires-python = ">={{python_version}}"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.23.0",
+    # 用 [asyncio] 额外引入 greenlet（异步 ORM 必需；单独写 sqlalchemy 不会自动安装 greenlet）
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiomysql>=0.2.0",
+    # MySQL 8 默认 caching_sha2_password 认证需要 RSA 加密握手，aiomysql/pymysql 依赖此包
+    "cryptography>=42.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-multipart>=0.0.6",
+    "PyJWT>=2.8.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-dotenv>=1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.27.0",
+    "aiosqlite>=0.20.0",
+]
+
+[tool.uv]
+# 应用型脚手架（非可发布库）：不打包安装项目本身，用 uv run 在环境中执行
+package = false
+# 默认同步时安装 dev 依赖组，便于测试
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]

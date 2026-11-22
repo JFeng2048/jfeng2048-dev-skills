@@ -1,0 +1,78 @@
+# =============================================================================
+# 由 SQL-to-FastAPI-Scaffold 生成
+# 目标项目通用忽略规则：Python 产物 / 虚拟环境 / 本地配置 / 测试缓存 / 运行时数据
+# =============================================================================
+
+# ---- Python 产物 ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ---- 虚拟环境 ----
+.venv/
+venv/
+ENV/
+env/
+
+# ---- 本地环境变量（模板文件保留）----
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.docker
+
+# ---- 测试 / 类型检查 / 格式化缓存 ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+nosetests.xml
+
+# ---- 日志与临时文件 ----
+logs/
+*.log
+*.log.*
+tmp/
+temp/
+*.tmp
+
+# ---- 数据库与备份（database/ 下的初始化 SQL 需要提交，只忽略备份与本地库文件）----
+database/backup/
+*.sqlite3
+*.db
+
+# ---- Docker / 运行时数据卷 ----
+docker/data/
+docker/mysql-data/
+docker/redis-data/
+
+# ---- 编辑器与操作系统 ----
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 本地导出产物（docs 下的接口文档需要提交，不要再忽略）----
+*.local.json

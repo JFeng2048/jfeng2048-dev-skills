@@ -1,0 +1,63 @@
+{
+  "version": "1.0.0",
+  "description": "状态/标识位敏感字段识别规则：命中后生成专用改状态接口（Schema StatusUpdate + Service.update_status + Resource PATCH /{pk}/status），且从通用 Update 中排除这些字段。Repository 仅 create/delete/update/get（增删改查顺序），不暴露 update_status；Service 调用 repo.update(字段字典) 持久化。",
+  "match": {
+    "exact_names": [
+      "status",
+      "state",
+      "enabled",
+      "locked",
+      "is_active",
+      "is_enabled",
+      "is_locked",
+      "is_disabled"
+    ],
+    "name_suffixes": [
+      "_status",
+      "_state",
+      "_flag"
+    ],
+    "name_prefixes": [
+      "status_",
+      "state_"
+    ]
+  },
+  "exclude_names": [
+    "is_delete",
+    "is_deleted",
+    "deleted",
+    "password",
+    "passwd",
+    "pwd",
+    "user_type",
+    "usertype",
+    "type"
+  ],
+  "generation": {
+    "schema_class": "{{ClassName}}StatusUpdate",
+    "service_method": "update_status",
+    "repository_method": "update",
+    "http_method": "PATCH",
+    "path": "/{{{primary_key_param}}}/status",
+    "notes": [
+      "状态字段从通用 PUT Update 中排除，避免被普通更新接口误改",
+      "专用接口只允许修改识别出的状态/标识位字段",
+      "业务入口在 Service.update_status；持久化走 Repository.update（字段字典）",
+      "软删除字段走 DELETE，不走本规则"
+    ]
+  },
+  "examples": {
+    "sso_user.status": {
+      "trigger": true,
+      "reason": "exact match status"
+    },
+    "admin.is_delete": {
+      "trigger": false,
+      "reason": "soft delete 走 DELETE，在 exclude_names 中"
+    },
+    "sso_user.userType": {
+      "trigger": false,
+      "reason": "账号类型不是状态标识，在 exclude_names 中"
+    }
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "version": "1.0.0",
+  "description": "命名规则配置",
+  "class_name": {
+    "conversion": "pascal_case",
+    "description": "表名转类名使用大驼峰命名",
+    "examples": {
+      "student": "Student",
+      "sys_class": "SysClass",
+      "student_course": "StudentCourse"
+    }
+  },
+  "file_name": {
+    "conversion": "snake_case",
+    "description": "表名转文件名使用蛇形命名",
+    "examples": {
+      "student": "student.py",
+      "sys_class": "sys_class.py",
+      "student_course": "student_course.py"
+    }
+  },
+  "resource_name": {
+    "conversion": "singular_snake_case",
+    "description": "资源名等于表名原样（蛇形单数）。用于文件夹、文件名和 Python 标识符，不直接作为 HTTP 前缀。例如表 company_file -> 文件夹 api/v1/company_file/、函数名 get_company_file_list。",
+    "template_variable": "resource_singular",
+    "forbidden": "严禁复数化。不得加 s、不得加 es、不得使用不规则复数。复数只允许出现在 tags 的中文文案中。",
+    "anti_patterns": {
+      "company_file": {
+        "wrong_folder": "api/v1/company_files/",
+        "right_folder": "api/v1/company_file/"
+      },
+      "student": {
+        "wrong_folder": "api/v1/students/",
+        "right_folder": "api/v1/student/"
+      },
+      "sys_class": {
+        "wrong_folder": "api/v1/sys_classes/",
+        "right_folder": "api/v1/sys_class/"
+      }
+    },
+    "examples": {
+      "student": "student",
+      "sys_class": "sys_class",
+      "company_file": "company_file"
+    }
+  },
+  "route_prefix": {
+    "conversion": "singular_kebab_case",
+    "description": "HTTP 路由前缀。由 resource_name 把下划线换成连字符，保持单数。模板变量是 route_prefix，不要把 resource_singular 写进 APIRouter prefix。",
+    "template_variable": "route_prefix",
+    "rule": "route_prefix = resource_name.replace('_', '-')",
+    "forbidden": "禁止复数，禁止保留下划线。company_file 的前缀是 /company-file，不是 /company_file，也不是 /company-files。",
+    "anti_patterns": {
+      "company_file": {
+        "wrong_prefix": ["/company_file", "/company-files"],
+        "right_prefix": "/company-file"
+      },
+      "sys_class": {
+        "wrong_prefix": ["/sys_class", "/sys-classes"],
+        "right_prefix": "/sys-class"
+      }
+    },
+    "examples": {
+      "student": "/student",
+      "sys_class": "/sys-class",
+      "company_file": "/company-file"
+    }
+  },
+  "service_name": {
+    "conversion": "snake_case_with_suffix",
+    "suffix": "_service",
+    "description": "业务服务：单条委托 Repository.create/delete/update/get；列表/状态等业务写在本层；skill 仅在不存在时生成。DI 名为 get_{table}_service；Resource 统一注入 Service",
+    "di_factory": "get_{table}_service",
+    "examples": {
+      "student": "student_service.py",
+      "sys_class": "sys_class_service.py",
+      "admin": {
+        "file": "admin_service.py",
+        "di": "get_admin_service"
+      }
+    }
+  },
+  "repository_name": {
+    "conversion": "snake_case_with_suffix",
+    "suffix": "_repository",
+    "description": "仓储：skill 可覆盖；仅单条 create/delete/update/get（增删改查顺序）。由 Service 委托调用；Resource 不直接注入",
+    "path": "repository/",
+    "di_factory": "get_{table}_repository",
+    "examples": {
+      "student": "repository/student_repository.py",
+      "sys_class": "repository/sys_class_repository.py",
+      "admin": {
+        "file": "repository/admin_repository.py",
+        "di": "get_admin_repository"
+      }
+    }
+  },
+  "layer_ownership": {
+    "description": "各层所有权与覆盖策略",
+    "rules": {
+      "repository": "AUTO-GENERATED：可被 skill 反复覆盖；仅单条 create/delete/update/get（增删改查顺序）；禁止 get_list/业务方法",
+      "service": "HAND-WRITTEN：单条委托 Repository；get_list/update_status 等业务写在本层；文件已存在则跳过",
+      "resource": "可覆盖生成基础 CRUD 路由；有状态字段时含 PATCH /{pk}/status；HTTP 统一 Depends Service，禁止直接依赖 Repository",
+      "model": "可覆盖生成（或按项目约定跳过手改模型）",
+      "schema": "可覆盖生成基础 DTO；状态字段从 Update 排除并生成 StatusUpdate；请求校验在进入 Resource 时由 Schema 完成",
+      "unit_test": "HAND-WRITTEN 占位：tests/unit/test_{table}_service.py；仅不存在时生成；默认 skip",
+      "integration_test": "tests/integration/api/v1/test_{table}.py；仅不存在时生成；含可跑 CRUD + 业务 skip 占位",
+      "utils": "BASELINE：见 project_baseline.json；skip_if_exists；禁止按表生成；import 仅用 canonical_imports（logger/custom_exceptions/masking/ids 等）",
+      "middleware": "BASELINE：security_headers / rate_limiter / audit_middleware；skip_if_exists；由 app/middleware.py 配置开关注册（默认关闭）",
+      "docker": "BASELINE：Dockerfile + docker-compose.yml（app+MySQL，Redis 可选 profile）；skip_if_exists；并生成根目录 .env.docker",
+      "deploy": "BASELINE：进阶运维配置（Nginx/监控/日志等）；skip_if_exists；非起步 compose 必跑依赖"
+    }
+  },
+  "project_baseline": {
+    "config": "resources/config/project_baseline.json",
+    "description": "基线包（utils、middleware、docker、deploy 等）探测与复用；默认 brownfield_prefer_existing"
+  },
+  "test_files": {
+    "description": "按表生成测试文件命名与路径",
+    "unit": {
+      "path": "tests/unit/test_{table_name}_service.py",
+      "template": "resources/templates/layers/test/unit/test_service_template.py",
+      "strategy": "create_if_missing",
+      "focus": "Service 层单元测试占位"
+    },
+    "integration": {
+      "path": "tests/integration/api/v1/test_{table_name}.py",
+      "template": "resources/templates/layers/test/integration/test_api_template.py",
+      "strategy": "create_if_missing",
+      "focus": "API CRUD 集成测试（可跑）+ 商业逻辑占位"
+    }
+  },
+  "repository_methods": {
+    "description": "Repository 方法名强制约定：仅单表单条记录；源码中方法定义顺序按增删改查：create → delete → update → get",
+    "allowed": ["create", "delete", "update", "get"],
+    "order": ["create", "delete", "update", "get"],
+    "forbidden": ["get_list", "get_by_pk", "update_fields", "update_status", "exists_by_pk"]
+  },
+  "status_flag_api": {
+    "description": "状态/标识位专用接口命名；识别规则见 status_flag_fields.json；业务入口仅在 Service",
+    "schema_class": "{ClassName}StatusUpdate",
+    "service_method": "update_status",
+    "repository_method": "update",
+    "http_method": "PATCH",
+    "path_suffix": "/status",
+    "full_path_example": "/sso-user/{user_id}/status"
+  },
+  "field_name": {
+    "conversion": "snake_case",
+    "description": "数据库字段名转Python属性名使用蛇形命名",
+    "examples": {
+      "student_id": "student_id",
+      "userID": "user_id",
+      "phoneNumber": "phone_number"
+    }
+  }
+}

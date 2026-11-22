@@ -1,0 +1,12 @@
+# 代码模板目录
+
+本目录用于存放代码生成模板文件。
+
+## 计划包含的模板
+
+- `model_template.py` - SQLAlchemy Model 模板
+- `schemas_template.py` - Pydantic Schema 模板
+- `resource_template.py` - FastAPI Resource 模板
+- `service_template.py` - Service Layer 模板
+
+这些模板将在后续任务中创建。

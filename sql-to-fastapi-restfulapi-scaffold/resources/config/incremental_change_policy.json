@@ -1,0 +1,380 @@
+{
+  "version": "1.0.0",
+  "description": "已有目标项目的增量更新策略：新增表 / 表结构变更 / 表下线。技能据此判定运行模式、做字段级差异分析、确定每层文件的更新动作、保护手写代码、幂等追加注册、给出 DDL 建议与回归清单。greenfield 仍按 project_baseline.json 处理。",
+  "scope": "仅当目标项目已存在骨架时启用。本文件是策略配置，不渲染代码；渲染仍由 resources/templates/ 驱动。",
+  "modes": {
+    "greenfield": "目标项目骨架不存在：生成完整项目骨架 + 本次 SQL 中所有表",
+    "add_table": "骨架已存在、该表相关文件均不存在：按表生成 7 类文件并追加注册",
+    "alter_table": "骨架已存在、该表至少一个文件已存在：先做旧/新结构字段级差异，再按 change_types 分层更新",
+    "drop_table": "用户明确要求移除/下线某表：只输出待删清单与顺序，默认不自动删除任何文件"
+  },
+  "mode_detection": {
+    "project_exists_if_any": [
+      "app/factory.py",
+      "core/database.py",
+      "pyproject.toml"
+    ],
+    "table_files": [
+      "models/{table}.py",
+      "schemas/{table}.py",
+      "repository/{table}_repository.py",
+      "service/{table}_service.py",
+      "api/v1/{resource_singular}/{resource_singular}Resource.py",
+      "tests/unit/test_{table}_service.py",
+      "tests/integration/api/v1/test_{table}.py"
+    ],
+    "rules": [
+      "项目骨架缺失 → greenfield",
+      "项目骨架存在 + 该表 table_files 全部缺失 → add_table",
+      "项目骨架存在 + 该表 table_files 任一存在 → alter_table（禁止当作 add_table 直接覆盖）",
+      "用户显式声明删除/下线该表 → drop_table",
+      "残留文件不成套（例如只剩 models/ 与 schemas/）→ 先向用户确认是补齐还是重生成，不得默认覆盖",
+      "一次提供多张表时逐表独立判定模式，允许同一批次混用 add_table 与 alter_table"
+    ]
+  },
+  "baseline_snapshot": {
+    "purpose": "把「旧表结构」与用户本次提供的 CREATE TABLE 做字段级比对；比对的是结构，不是代码文本。没有旧结构就只做 add_table，禁止猜测差异。",
+    "source_priority": [
+      "用户提供的旧版 CREATE TABLE / database/*.sql 建库脚本",
+      "目标项目 models/{table}.py 中 Column 定义（db_name / 类型 / nullable / unique / default / comment / primary_key / ForeignKey）",
+      "目标项目 schemas/{table}.py 的字段声明（仅用于交叉校验，不作为唯一依据）",
+      "运行库 information_schema（仅在用户明确同意连接数据库时）"
+    ],
+    "compare_dimensions": [
+      "column_name",
+      "sql_type",
+      "nullable",
+      "unique",
+      "default",
+      "comment",
+      "primary_key",
+      "foreign_key",
+      "status_flag_set",
+      "soft_delete_field",
+      "table_name"
+    ],
+    "normalization": [
+      "大小写与反引号/引号差异视为相同",
+      "字段名按 naming_rules.json 归一（驼峰 → snake_case），db_name 保留原名",
+      "类型别名归一：INT/INTEGER、BOOL/BOOLEAN/TINYINT(1) 等按 type_mappings.json 的等价组",
+      "忽略列顺序、空行、注释格式差异",
+      "status_flag_set 由 status_flag_fields.json 重新计算，不沿用旧结论"
+    ],
+    "output": {
+      "table_level": ["new_table", "removed_table", "renamed_table", "unchanged"],
+      "column_level": ["added", "removed", "renamed_candidate", "type_changed", "constraint_changed", "comment_only"],
+      "must_include": ["旧值", "新值", "风险等级", "受影响文件", "是否需人工确认"]
+    }
+  },
+  "file_roles": {
+    "models/{table}.py": {
+      "ownership": "generated",
+      "marker": "【AUTO-GENERATED】/ 此文件由 SQL-to-FastAPI-Scaffold 自动生成",
+      "on_alter": "overwrite"
+    },
+    "schemas/{table}.py": {
+      "ownership": "generated",
+      "marker": "【AUTO-GENERATED】/ 此文件由 SQL-to-FastAPI-Scaffold 自动生成",
+      "on_alter": "overwrite"
+    },
+    "repository/{table}_repository.py": {
+      "ownership": "generated",
+      "marker": "【AUTO-GENERATED】",
+      "on_alter": "overwrite"
+    },
+    "service/{table}_service.py": {
+      "ownership": "hand_written",
+      "marker": "【HAND-WRITTEN】",
+      "on_alter": "never_overwrite__emit_todo__append_only_with_confirmation"
+    },
+    "api/v1/{resource_singular}/{resource_singular}Resource.py": {
+      "ownership": "generated_with_manual_routes",
+      "marker": "【AUTO-GENERATED】",
+      "on_alter": "regenerate_crud__preserve_manual_routes"
+    },
+    "tests/unit/test_{table}_service.py": {
+      "ownership": "hand_written",
+      "marker": "【HAND-WRITTEN 占位】",
+      "on_alter": "never_overwrite__emit_todo"
+    },
+    "tests/integration/api/v1/test_{table}.py": {
+      "ownership": "hand_written",
+      "marker": "【覆盖策略】文件已存在则 skill 跳过",
+      "on_alter": "never_overwrite__emit_todo"
+    },
+    "api/v1/__init__.py": {
+      "ownership": "append_only",
+      "marker": "# ---- 脚手架追加区 ----",
+      "on_alter": "idempotent_append"
+    },
+    "service/dependencies.py": {
+      "ownership": "append_only",
+      "marker": "# ---- 脚手架追加区",
+      "on_alter": "idempotent_append"
+    },
+    "models/__init__.py": {
+      "ownership": "append_only_if_project_convention",
+      "marker": "无",
+      "on_alter": "idempotent_append_only_if_existing_models_are_exported"
+    },
+    "README.md": {
+      "ownership": "hand_written",
+      "marker": "无",
+      "on_alter": "update_generated_api_section_only"
+    },
+    "scripts/export_openapi.py": {
+      "ownership": "baseline",
+      "marker": "无",
+      "on_alter": "fill_if_missing_never_overwrite"
+    },
+    "docs/openapi.json": {
+      "ownership": "exported",
+      "marker": "无",
+      "on_alter": "regenerate_by_export_script"
+    },
+    "docs/api.md": {
+      "ownership": "exported",
+      "marker": "无",
+      "on_alter": "regenerate_by_export_script"
+    },
+    "utils/**:middleware/**:docker/**:deploy/**": {
+      "ownership": "baseline",
+      "marker": "project_baseline.json",
+      "on_alter": "never_touch"
+    }
+  },
+  "change_types": {
+    "add_table": {
+      "risk": "low",
+      "ddl_hint": "按用户提供的 CREATE TABLE 建表（技能不执行）",
+      "regenerate": [
+        "models/{table}.py",
+        "schemas/{table}.py",
+        "repository/{table}_repository.py",
+        "service/{table}_service.py（仅不存在时）",
+        "api/v1/{resource_singular}/{resource_singular}Resource.py",
+        "tests/unit/test_{table}_service.py（仅不存在时）",
+        "tests/integration/api/v1/test_{table}.py（仅不存在时）"
+      ],
+      "append_only": [
+        "api/v1/{resource_singular}/__init__.py（导出 router）",
+        "api/v1/__init__.py",
+        "service/dependencies.py"
+      ],
+      "manual_todo": [],
+      "verify": ["新路由出现在 /docs", "集成 CRUD 流程可跑通", "uv run python scripts/export_openapi.py 重写 docs/openapi.json 与 docs/api.md"]
+    },
+    "add_column": {
+      "risk": "low",
+      "ddl_hint": "ALTER TABLE {table} ADD COLUMN {column_def};",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py", "repository/{table}_repository.py"],
+      "manual_todo": [
+        "service/{table}_service.py：get_list 的过滤/排序字段、业务校验按需补新列",
+        "tests/integration/api/v1/test_{table}.py：create_payload / update_payload / 断言按需补新列",
+        "README.md：字段与接口示例同步"
+      ],
+      "verify": ["新列出现在 Create / Update / Response Schema", "POST 写入新列后 GET 详情可读回", "重新导出 docs/openapi.json 与 docs/api.md"]
+    },
+    "drop_column": {
+      "risk": "high",
+      "ddl_hint": "ALTER TABLE {table} DROP COLUMN {column};（需先确认无代码引用与数据备份）",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py", "repository/{table}_repository.py"],
+      "manual_todo": [
+        "全局检索该列名（含 db_name 驼峰形式）：Service 过滤条件、手写业务、Resource 手写路由、测试 payload、README",
+        "先移除代码引用再执行 DDL，避免运行期 AttributeError / Unknown column"
+      ],
+      "verify": ["grep 无残留引用", "既有集成测试通过"]
+    },
+    "rename_column": {
+      "risk": "high",
+      "ddl_hint": "ALTER TABLE {table} RENAME COLUMN {old} TO {new};（MySQL 8.0 可用 CHANGE COLUMN 并保持类型）",
+      "detection": "差异算法会报 removed + added；必须先询问用户是「重命名」还是「删旧列+加新列」，两者数据语义不同",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py", "repository/{table}_repository.py"],
+      "manual_todo": ["同 drop_column：全局检索旧列名并迁移引用", "确认是否需要数据回填"],
+      "verify": ["旧列名无残留", "新列名读写正常"]
+    },
+    "modify_column_type": {
+      "risk": "medium",
+      "ddl_hint": "ALTER TABLE {table} MODIFY COLUMN {column} {new_type};",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py"],
+      "manual_todo": ["service/{table}_service.py 中对该字段的比较/运算/格式化逻辑", "测试 payload 的示例值类型"],
+      "verify": ["Pydantic 校验与 SQLAlchemy 类型一致", "既有集成测试通过"]
+    },
+    "modify_nullable": {
+      "risk": "medium",
+      "ddl_hint": "ALTER TABLE {table} MODIFY COLUMN {column} {type} [NOT] NULL;",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py"],
+      "manual_todo": ["收紧为 NOT NULL 时检查历史数据与 create_payload 是否必填"],
+      "verify": ["Create Schema 必填性与 DDL 一致", "POST 缺省字段行为符合预期"]
+    },
+    "modify_default": {
+      "risk": "low",
+      "ddl_hint": "ALTER TABLE {table} ALTER COLUMN {column} SET DEFAULT {default};",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py"],
+      "manual_todo": [],
+      "verify": ["POST 不传该字段时落库值符合预期"]
+    },
+    "modify_unique": {
+      "risk": "medium",
+      "ddl_hint": "ALTER TABLE {table} ADD UNIQUE KEY ... / DROP INDEX ...;",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py"],
+      "manual_todo": ["唯一键冲突时的异常映射（ConflictException）按需补在 Service"],
+      "verify": ["重复值写入返回可预期的错误", "集成测试唯一值辅助函数仍有效"]
+    },
+    "add_status_flag": {
+      "risk": "high",
+      "ddl_hint": "按 add_column 处理",
+      "regenerate": [
+        "models/{table}.py",
+        "schemas/{table}.py（新增 {ClassName}StatusUpdate；从通用 Update 排除该字段）",
+        "repository/{table}_repository.py",
+        "api/v1/{resource_singular}/{resource_singular}Resource.py（新增 PATCH /{pk}/status）"
+      ],
+      "append_only_with_confirmation": [
+        "service/{table}_service.py：必须追加 update_status(pk, data) 方法，内部调用 repo.update(pk, data.model_dump(exclude_unset=True))；因该文件为手写保护，需先征得用户同意再在「商业逻辑区」追加，禁止整文件覆盖"
+      ],
+      "manual_todo": [
+        "tests/integration/api/v1/test_{table}.py：补 PATCH /{pk}/status 用例；补「通用 PUT 携带状态字段应 422」用例",
+        "tests/unit/test_{table}_service.py：补 update_status 占位"
+      ],
+      "verify": ["Resource 调用的 service.update_status 确实存在（否则 500）", "PATCH 生效且 PUT 拒绝状态字段"]
+    },
+    "drop_status_flag": {
+      "risk": "high",
+      "ddl_hint": "按 drop_column 处理",
+      "regenerate": [
+        "models/{table}.py",
+        "schemas/{table}.py（删除 {ClassName}StatusUpdate；字段回归通用 Update 或随列删除）",
+        "repository/{table}_repository.py",
+        "api/v1/{resource_singular}/{resource_singular}Resource.py（移除 PATCH /{pk}/status 与 StatusUpdate import）"
+      ],
+      "manual_todo": ["service/{table}_service.py：移除或废弃 update_status（保留会成为死代码）", "测试中移除 PATCH 用例"],
+      "verify": ["无 StatusUpdate 残留 import", "/docs 不再暴露 PATCH status"]
+    },
+    "change_soft_delete_field": {
+      "risk": "high",
+      "ddl_hint": "按 add_column / drop_column 处理",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py", "repository/{table}_repository.py（delete 软删/硬删分支、get 过滤）"],
+      "manual_todo": [
+        "service/{table}_service.py：get_list 的软删排除条件必须同步改字段名（手写文件，技能不得覆盖）",
+        "tests/integration/api/v1/test_{table}.py：删除后库表断言（软删留行 / 硬删无行）与详情 404 断言"
+      ],
+      "verify": ["DELETE 行为与字段一致", "列表不返回已软删记录"]
+    },
+    "change_primary_key": {
+      "risk": "critical",
+      "ddl_hint": "ALTER TABLE {table} DROP PRIMARY KEY, ADD PRIMARY KEY ({new_pk});（需人工评估数据与外键）",
+      "requires_user_confirmation": true,
+      "regenerate": ["models/{table}.py", "schemas/{table}.py", "repository/{table}_repository.py", "api/v1/{resource_singular}/{resource_singular}Resource.py"],
+      "manual_todo": [
+        "service/{table}_service.py：create/get_detail/update/delete 的主键参数名与类型",
+        "tests：路径参数、payload、唯一值辅助函数",
+        "README：接口路径示例"
+      ],
+      "verify": ["所有路径参数类型一致", "集成 CRUD 全流程通过"]
+    },
+    "add_foreign_key": {
+      "risk": "medium",
+      "ddl_hint": "ALTER TABLE {table} ADD CONSTRAINT ... FOREIGN KEY ({column}) REFERENCES {ref};",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py"],
+      "manual_todo": ["确认被引用表模型已存在；按需在 Service 补存在性校验"],
+      "verify": ["应用可启动（relationship 可解析）", "写入非法外键值返回可预期错误"]
+    },
+    "drop_foreign_key": {
+      "risk": "medium",
+      "ddl_hint": "ALTER TABLE {table} DROP FOREIGN KEY {name};",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py"],
+      "manual_todo": ["清理不再成立的 relationship / 联表查询"],
+      "verify": ["应用可启动", "既有集成测试通过"]
+    },
+    "comment_only": {
+      "risk": "low",
+      "ddl_hint": "可选：ALTER TABLE {table} MODIFY COLUMN {column} {type} COMMENT '{comment}';",
+      "regenerate": ["models/{table}.py", "schemas/{table}.py"],
+      "manual_todo": [],
+      "verify": ["/docs 字段描述已更新"]
+    },
+    "rename_table": {
+      "risk": "critical",
+      "ddl_hint": "RENAME TABLE {old} TO {new};",
+      "requires_user_confirmation": true,
+      "blocked_from_auto": true,
+      "note": "按「旧表 drop + 新表 add」处理会丢路由与手写业务；必须先询问，再输出重命名清单，不自动批量改名",
+      "manual_todo": ["文件/类名/路由前缀/注册项/测试路径/文档全量改名清单"],
+      "verify": ["旧路由下线、新路由可用", "无旧名残留"]
+    },
+    "drop_table": {
+      "risk": "critical",
+      "requires_user_confirmation": true,
+      "blocked_from_auto": true,
+      "note": "默认不删除任何文件、不执行 DROP TABLE；只输出待删文件清单、注册项移除清单与推荐下线顺序",
+      "manual_todo": ["人工确认后按清单删除", "先摘路由再删代码，最后处理数据"],
+      "verify": ["应用可启动", "/docs 无该资源"]
+    }
+  },
+  "hand_written_protection": {
+    "detection": [
+      "读取文件头 docstring，命中 HAND-WRITTEN / 覆盖策略 等标记即视为手写文件",
+      "文件存在但无标记 → 视为用户已手改，禁止覆盖，改为输出待办并询问",
+      "资源文件含脚手架 CRUD 区块之外的自定义路由 → 保留自定义路由，仅重生成 CRUD 区块"
+    ],
+    "rules": [
+      "Service / 单元占位 / 集成测试：任何情况下都不得整文件覆盖",
+      "确需向 Service 追加生成代码（如 update_status）时，必须：先展示将追加的代码片段 → 取得用户确认 → 只在文件末尾「商业逻辑区」追加最小方法 → 不改已有代码",
+      "技能无法安全合并时，生成「人工待办清单」而不是猜测性覆盖",
+      "变更报告中必须列出所有被跳过的手写文件与原因"
+    ]
+  },
+  "registration": {
+    "append_only_markers": {
+      "api/v1/__init__.py": "# ---- 脚手架追加区 ----",
+      "service/dependencies.py": "# ---- 脚手架追加区"
+    },
+    "on_add_table": [
+      "创建 api/v1/{resource_singular}/__init__.py：from .{resource_singular}Resource import router 并 __all__ = [\"router\"]；缺此文件会导致 from api.v1.{resource_singular} import router 直接 ImportError",
+      "api/v1/__init__.py 追加 from api.v1.{resource_singular} import router as {resource_singular}_router 与 v1_router.include_router({resource_singular}_router)",
+      "service/dependencies.py 追加 get_{table}_service（及可选 get_{table}_repository）",
+      "models/__init__.py：仅当项目已有按表导出惯例时追加 import 与 __all__"
+    ],
+    "dedupe": [
+      "追加前全文检索同一 import / include_router / def get_{table}_service，已存在则不重复追加",
+      "同一份 SQL 连续运行两次必须得到零 diff（幂等）",
+      "路由前缀或 Service 名变化时，先移除旧注册行再追加新行，禁止新旧并存"
+    ],
+    "on_alter_table": "默认不重复注册；仅当 route_prefix / Service 名变化时做「先删旧行、再追加」替换"
+  },
+  "migration": {
+    "skill_does_not": [
+      "不执行任何 DDL、不连接生产库",
+      "不生成或改写数据库初始化脚本（由用户放入 database/）",
+      "不自动接入 Alembic、不自动创建迁移版本",
+      "不删除数据、不删除已有文件"
+    ],
+    "skill_must": [
+      "代码变更后运行 scripts/export_openapi.py 重写 docs/openapi.json 与 docs/api.md，禁止手改这两份文件来同步字段",
+      "在变更报告中逐条列出 ddl_hint（MySQL 语法建议），标注「需人工确认/执行」",
+      "提示代码与库表发布顺序：加列先 DDL 后发代码；删列先发代码（停止引用）后 DDL",
+      "提醒备份、灰度与回滚"
+    ]
+  },
+  "verification": [
+    "uv run python -c \"import start\" 或等价导入检查（捕获 ImportError / 列名残留）",
+    "uv run pytest tests/ -c tests/pytest.ini -v",
+    "启动后访问 /docs，确认新增/变更的 Schema 与端点",
+    "uv run python scripts/export_openapi.py，确认 docs/openapi.json 与代码路径一致",
+    "对变化字段执行最小 CRUD 冒烟：POST 写入 → GET 详情读回 → PUT 更新 → DELETE",
+    "确认同一 SQL 重复执行结果幂等"
+  ],
+  "report": {
+    "required_sections": [
+      "运行模式（逐表）",
+      "旧/新结构差异清单（字段级：旧值/新值/风险）",
+      "已重生成文件列表",
+      "已追加注册项",
+      "跳过的手写文件与原因",
+      "人工待办清单（含具体文件与建议代码片段）",
+      "DDL 建议与发布顺序",
+      "验证命令与结果"
+    ]
+  }
+}

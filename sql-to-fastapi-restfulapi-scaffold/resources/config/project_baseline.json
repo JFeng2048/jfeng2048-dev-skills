@@ -1,0 +1,311 @@
+{
+  "version": "1.2.0",
+  "description": "目标项目基线包清单：core/app/config/utils/middleware/docker/deploy 等为脚手架基线，不按表生成；已存在则跳过/不覆盖。层模板 import 必须以 canonical_imports 为准。",
+  "mode": "brownfield_prefer_existing",
+  "modes": {
+    "greenfield": "空项目：从 project_structure 写入基线包（含 core/、app/、config/、utils/、middleware/、docker/、deploy/、.env.example、.env.docker）",
+    "brownfield_prefer_existing": "检测到基线包已存在则整包跳过；层代码只复用 canonical_imports",
+    "brownfield_fill_missing": "已存在文件不覆盖；清单中缺失的文件才从模板补齐"
+  },
+  "detection": {
+    "core_exists_if": [
+      "core/__init__.py",
+      "core/database.py",
+      "core/permissions.py"
+    ],
+    "app_exists_if": [
+      "app/factory.py",
+      "app/middleware.py"
+    ],
+    "utils_exists_if": [
+      "utils/__init__.py",
+      "utils/custom_exceptions.py"
+    ],
+    "middleware_exists_if": [
+      "middleware/__init__.py",
+      "middleware/security_headers.py"
+    ],
+    "docker_exists_if": [
+      "docker/Dockerfile",
+      "docker/docker-compose.yml"
+    ],
+    "deploy_exists_if": [
+      "deploy/nginx.conf"
+    ],
+    "on_exists": "skip_entire_package",
+    "on_missing_required_export": "warn_and_stop_or_fill_missing_file_only"
+  },
+  "packages": {
+    "core": {
+      "path": "core",
+      "policy": "skip_if_exists",
+      "template_dir": "resources/templates/project_structure/core",
+      "description": "运行时基础设施：async DB、permissions、security 薄封装、cache、queue",
+      "required_modules": [
+        {
+          "module": "core.database",
+          "file": "core/database.py",
+          "exports": ["get_async_session", "create_database_pool", "Base"],
+          "used_by": ["app", "service", "repository", "models"]
+        },
+        {
+          "module": "core.permissions",
+          "file": "core/permissions.py",
+          "exports": [
+            "CurrentUser",
+            "get_current_active_user",
+            "require_roles",
+            "require_permission",
+            "require_admin"
+          ],
+          "used_by": []
+        }
+      ],
+      "forbidden": [
+        "在 core 中写单表业务 CRUD",
+        "恢复 core/dependencies DI 容器"
+      ]
+    },
+    "app": {
+      "path": "app",
+      "policy": "skip_if_exists",
+      "template_dir": "resources/templates/project_structure/app",
+      "description": "应用工厂 / lifespan / 中间件注册 / 异常 / 基础路由",
+      "required_files": [
+        "app/factory.py",
+        "app/config.py",
+        "app/middleware.py",
+        "app/exceptions.py",
+        "app/routes.py"
+      ],
+      "forbidden": [
+        "另造 app/events.py 与 factory 双 lifespan（本基线 lifespan 在 factory）",
+        "Resource 层业务写在 app/"
+      ]
+    },
+    "utils": {
+      "path": "utils",
+      "policy": "skip_if_exists",
+      "template_dir": "resources/templates/project_structure/utils",
+      "description": "通用工具包；不耦合业务 Model；通用认证 / 授权依赖放 core/permissions.py",
+      "required_modules": [
+        {
+          "module": "utils.custom_exceptions",
+          "file": "utils/custom_exceptions.py",
+          "exports": [
+            "BaseAPIException",
+            "NotFoundException",
+            "ValidationException",
+            "BusinessException",
+            "AuthenticationException",
+            "AuthorizationException",
+            "ConflictException",
+            "handle_service_exceptions"
+          ],
+          "used_by": ["repository", "service", "resource", "app"]
+        },
+        {
+          "module": "utils.response_code",
+          "file": "utils/response_code.py",
+          "exports": ["RET", "BusinessCode", "BizCode", "get_message"],
+          "used_by": ["schema", "resource", "app", "utils.custom_exceptions", "middleware"],
+          "note": "只含通用/HTTP 服务级响应码；业务码由生成目标项目时按 SQL 业务追加到 BusinessCode，并同步补 error_map_CN / error_map_EN"
+        },
+        {
+          "module": "utils.logger",
+          "file": "utils/logger.py",
+          "exports": [
+            "setup_logging",
+            "setup_logger",
+            "get_logger",
+            "get_security_logger",
+            "log_api_access",
+            "log_security_event"
+          ],
+          "used_by": ["app", "service", "middleware"]
+        },
+        {
+          "module": "utils.validators",
+          "file": "utils/validators.py",
+          "exports": [
+            "DataValidator",
+            "validate_email",
+            "validate_phone",
+            "validate_username",
+            "validate_required",
+            "validate_length"
+          ],
+          "used_by": ["schema", "service"]
+        },
+        {
+          "module": "utils.masking",
+          "file": "utils/masking.py",
+          "exports": ["mask_phone", "mask_email", "mask_middle"],
+          "used_by": ["schema", "service"]
+        },
+        {
+          "module": "utils.ids",
+          "file": "utils/ids.py",
+          "exports": ["new_uuid4_hex", "new_business_id", "new_urlsafe_token"],
+          "used_by": ["service"]
+        },
+        {
+          "module": "utils.auth",
+          "file": "utils/auth.py",
+          "exports": [
+            "JWTAuthenticator",
+            "create_jwt_authenticator_from_settings",
+            "jwt_authenticator"
+          ],
+          "used_by": ["core", "service", "resource"]
+        },
+        {
+          "module": "utils.security",
+          "file": "utils/security.py",
+          "exports": ["SecurityUtil"],
+          "used_by": ["service", "core"]
+        },
+        {
+          "module": "utils.audit",
+          "file": "utils/audit.py",
+          "exports": ["AuditAction", "AuditLevel", "audit_logger"],
+          "used_by": ["middleware", "resource"],
+          "optional": false
+        }
+      ],
+      "forbidden": [
+        "为单表新建 utils/{table}_*.py",
+        "在 utils 中 import models.* / service.* / repository.*",
+        "用 loguru.py 替代 logger.py",
+        "另造与 canonical_imports 冲突的异常/日志模块"
+      ]
+    },
+    "middleware": {
+      "path": "middleware",
+      "policy": "skip_if_exists",
+      "template_dir": "resources/templates/project_structure/middleware",
+      "description": "企业级 HTTP 中间件基线；由 app/middleware.py 按配置开关注册，默认关闭",
+      "depends_on": ["utils"],
+      "required_modules": [
+        {
+          "module": "middleware.security_headers",
+          "file": "middleware/security_headers.py",
+          "exports": ["SecurityHeadersMiddleware"],
+          "used_by": ["app.middleware"],
+          "purpose": "安全响应头（XSS/点击劫持/CSP 等）"
+        },
+        {
+          "module": "middleware.rate_limiter",
+          "file": "middleware/rate_limiter.py",
+          "exports": ["RateLimitMiddleware", "RateLimiter"],
+          "used_by": ["app.middleware"],
+          "purpose": "内存令牌桶限流（OWASP API4）"
+        },
+        {
+          "module": "middleware.audit_middleware",
+          "file": "middleware/audit_middleware.py",
+          "exports": ["AuditMiddleware"],
+          "used_by": ["app.middleware"],
+          "purpose": "HTTP 请求审计日志"
+        }
+      ],
+      "registration": {
+        "file": "app/middleware.py",
+        "switches": [
+          "middleware_security_headers_enabled",
+          "middleware_rate_limit_enabled",
+          "middleware_audit_enabled"
+        ],
+        "default": false,
+        "note": "CORS 始终注册；三套安全中间件默认 False，避免干扰开发与测试"
+      },
+      "forbidden": [
+        "为单表新建 middleware/{table}_*.py",
+        "在中间件中写业务 CRUD / 直连 Repository",
+        "恢复已淘汰的 sql_injection_protection / request_validation 等反模式中间件"
+      ]
+    },
+    "docker": {
+      "path": "docker",
+      "policy": "skip_if_exists",
+      "template_dir": "resources/templates/project_structure/docker",
+      "description": "起步 Docker 栈：Dockerfile + compose（app + MySQL，Redis 为 profile 可选项）",
+      "required_files": [
+        "docker/Dockerfile",
+        "docker/docker-compose.yml"
+      ],
+      "optional_files": [
+        "docker/README.md",
+        ".env.docker"
+      ],
+      "compose": {
+        "file": "docker/docker-compose.yml",
+        "services": ["api", "mysql"],
+        "optional_profile": "redis",
+        "run_from": "project_root",
+        "commands": {
+          "default": "docker compose -f docker/docker-compose.yml up --build",
+          "with_redis": "REDIS_HOST=redis docker compose -f docker/docker-compose.yml --profile redis up --build"
+        }
+      },
+      "forbidden": [
+        "按表生成 docker 文件",
+        "把 Nginx/Prometheus/ELK 默认塞进起步 compose（进阶放 deploy/）"
+      ]
+    },
+    "deploy": {
+      "path": "deploy",
+      "policy": "skip_if_exists",
+      "template_dir": "resources/templates/project_structure/deploy",
+      "description": "进阶运维配置（Nginx/MySQL/Redis 调优、Prometheus/Grafana、Logstash、Supervisor、历史部署脚本）；非起步 compose 必跑依赖",
+      "required_files": [
+        "deploy/nginx.conf",
+        "deploy/mysql.cnf",
+        "deploy/redis.conf"
+      ],
+      "note": "完整复制 project_structure/deploy/**；已存在则跳过。docker-deploy.* 可能引用旧 compose 名，生成 README 时引导使用 docker/docker-compose.yml",
+      "forbidden": [
+        "按表生成 deploy 文件",
+        "要求首次脚手架必须启动 monitoring/ELK"
+      ]
+    }
+  },
+  "root_files": [
+    {
+      "path": ".gitignore",
+      "template": "resources/templates/project_structure/.gitignore",
+      "policy": "skip_if_exists",
+      "description": "目标项目 Git 忽略规则（Python 产物 / 虚拟环境 / 本地配置 / 测试缓存 / 运行时数据）"
+    }
+  ],
+  "canonical_imports": {
+    "base_exception": "from utils.custom_exceptions import BaseAPIException",
+    "not_found": "from utils.custom_exceptions import NotFoundException",
+    "validation": "from utils.custom_exceptions import ValidationException",
+    "business": "from utils.custom_exceptions import BusinessException",
+    "handle_exceptions": "from utils.custom_exceptions import handle_service_exceptions",
+    "response_code": "from utils.response_code import RET",
+    "business_code": "from utils.response_code import BusinessCode",
+    "response_message": "from utils.response_code import get_message",
+    "logger": "from utils.logger import get_logger",
+    "setup_logging": "from utils.logger import setup_logging",
+    "mask_phone": "from utils.masking import mask_phone",
+    "mask_email": "from utils.masking import mask_email",
+    "new_business_id": "from utils.ids import new_business_id",
+    "security_util": "from utils.security import SecurityUtil",
+    "security_headers_mw": "from middleware import SecurityHeadersMiddleware",
+    "rate_limit_mw": "from middleware import RateLimitMiddleware",
+    "audit_mw": "from middleware import AuditMiddleware",
+    "get_async_session": "from core.database import get_async_session",
+    "get_current_active_user": "from core.permissions import get_current_active_user",
+    "success_response": "from schemas.response import success_response",
+    "paginated_response": "from schemas.response import paginated_response"
+  },
+  "layer_import_rules": {
+    "repository": ["not_found"],
+    "resource": ["handle_exceptions", "success_response", "paginated_response"],
+    "service": ["not_found", "validation", "business", "logger"],
+    "schema": ["mask_phone", "mask_email"],
+    "app": ["setup_logging", "base_exception", "security_headers_mw", "rate_limit_mw", "audit_mw"]
+  }
+}

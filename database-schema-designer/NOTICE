@@ -1,0 +1,15 @@
+This skill is adapted from OneWave AI's database-schema-designer:
+
+  https://github.com/OneWave-AI/claude-skills/tree/main/database-schema-designer
+
+Copyright (c) 2025 OneWave AI
+Licensed under the MIT License. See LICENSE.
+
+Modifications in this adaptation:
+- A short request is refined with a few numbered product decisions (default 4 rounds). A detailed specification is read first and only schema-changing gaps are confirmed (default 2 rounds, or none). The user is not asked to pick an interview depth.
+- Primary deliverables are standalone executable schema script(s) and a Markdown design document that explains each table's purpose and relationships.
+- PostgreSQL and MySQL are first-class engines, each with its own design norms, checklist, and templates. Targeting both engines produces two dialect-correct scripts rather than one shared dialect.
+- An existing schema is changed with a difference list and migrations. A full script is for a new schema or an explicit rebuild.
+- PostgreSQL 18-only syntax is gated on the detected version. Supabase is not assumed to be 18, and `auth.uid()` is not emitted outside Supabase.
+- MySQL generated-column substitutes document the query that must use that column. Accent-insensitive uniqueness is called out against PostgreSQL `lower()`.
+- MongoDB skips the relational key, foreign-key, and index steps.

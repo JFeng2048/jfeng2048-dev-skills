@@ -1,0 +1,29 @@
+# Xcode
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# 由 XcodeGen 生成，不入库
+*.xcodeproj
+
+# 签名与本地配置
+*.mobileprovision
+*.p12
+xcuserdata/
+
+# macOS
+.DS_Store

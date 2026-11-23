@@ -1,0 +1,41 @@
+/* English strings: keys must match zh-Hans.lproj */
+
+"app.name" = "技能互换";
+
+"common.loading" = "Loading…";
+"common.retry" = "Retry";
+"common.cancel" = "Cancel";
+"common.confirm" = "OK";
+"common.no_more" = "No more items";
+
+"home.title" = "Skill Plaza";
+"home.search.placeholder" = "Search skills";
+"home.empty.title" = "No data";
+"home.empty.desc" = "Try another keyword or come back later";
+"home.error.title" = "Failed to load";
+
+"detail.title" = "Detail";
+"detail.free" = "Free";
+"detail.contact" = "Contact";
+"detail.contact.done" = "Request sent (demo)";
+"detail.not_found" = "Not found or removed";
+"detail.empty_desc" = "No description";
+
+"login.title" = "Welcome back";
+"login.subtitle" = "Sign in to see everything";
+"login.username" = "Username";
+"login.password" = "Password";
+"login.submit" = "Sign in";
+"login.hint" = "Tip: any username works in mock mode, password needs 6+ characters";
+"login.error.invalid" = "Enter a username and a password of at least 6 characters";
+"login.error.failed" = "Sign in failed, please try again later";
+
+"mine.title" = "Mine";
+"mine.nickname" = "Student";
+"mine.signature" = "Signed in (mock account)";
+"mine.my_posts" = "My posts";
+"mine.settings" = "Settings";
+"mine.about" = "About";
+"mine.logout" = "Sign out";
+"mine.logout.confirm.title" = "Sign out";
+"mine.logout.confirm.message" = "You need to sign in again. Continue?";

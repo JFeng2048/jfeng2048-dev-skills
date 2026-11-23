@@ -1,0 +1,66 @@
+{
+  "$comment": "设计 token：从原型抽取后写入 core/designsystem/theme，页面只引用语义色与 Dimens，禁止硬编码",
+  "color": {
+    "primary": "{{primary_color_hex}}",
+    "on_primary": "FFFFFF",
+    "primary_container": "DCE6FF",
+    "on_primary_container": "001A44",
+    "background": "F7F8FA",
+    "surface": "FFFFFF",
+    "on_surface": "1A1C1E",
+    "on_surface_variant": "5F6368",
+    "outline": "E0E3E8",
+    "error": "BA1A1A"
+  },
+  "dark_color": {
+    "primary": "AFC6FF",
+    "on_primary": "002E6B",
+    "background": "121418",
+    "surface": "1A1C1E",
+    "on_surface": "E2E2E6",
+    "on_surface_variant": "C4C6CF",
+    "outline": "8E9099",
+    "error": "FFB4AB"
+  },
+  "shape": {
+    "card": 12,
+    "button": 10,
+    "chip": 8,
+    "dialog": 20,
+    "unit": "dp"
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "xxl": 32,
+    "unit": "dp",
+    "rule": "页面外边距统一 16dp，列表项间距 12dp"
+  },
+  "typography": {
+    "titleLarge": { "size": 22, "weight": "SemiBold" },
+    "titleMedium": { "size": 17, "weight": "SemiBold" },
+    "bodyLarge": { "size": 15, "weight": "Normal" },
+    "bodyMedium": { "size": 14, "weight": "Normal" },
+    "bodySmall": { "size": 12, "weight": "Normal" },
+    "labelSmall": { "size": 11, "weight": "Medium" },
+    "unit": "sp"
+  },
+  "elevation": {
+    "card": 1,
+    "topbar": 0,
+    "bottom_bar": 3
+  },
+  "image": {
+    "list_thumb_size": 72,
+    "avatar_size": 48,
+    "placeholder": "Coil AsyncImage 的 placeholder 用 surfaceVariant 纯色块，error 用 ic_broken_image",
+    "rule": "原型里的远程图片可能 403，必须有占位与错误兜底"
+  },
+  "dark_mode": {
+    "strategy": "跟随系统 isSystemInDarkTheme()，两套 colorScheme 都写全",
+    "forbidden": "页面里禁止 if (isDark) 手动挑颜色"
+  }
+}

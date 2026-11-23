@@ -1,0 +1,41 @@
+/* 简体中文文案：key 必须与 en.lproj 保持一致 */
+
+"app.name" = "技能互换";
+
+"common.loading" = "加载中…";
+"common.retry" = "重试";
+"common.cancel" = "取消";
+"common.confirm" = "确定";
+"common.no_more" = "没有更多了";
+
+"home.title" = "技能广场";
+"home.search.placeholder" = "搜索技能";
+"home.empty.title" = "暂无数据";
+"home.empty.desc" = "换个关键词试试，或稍后再来看看";
+"home.error.title" = "加载失败";
+
+"detail.title" = "详情";
+"detail.free" = "免费";
+"detail.contact" = "联系 TA";
+"detail.contact.done" = "已发起联系请求（示例）";
+"detail.not_found" = "内容不存在或已下架";
+"detail.empty_desc" = "暂无详细介绍";
+
+"login.title" = "欢迎回来";
+"login.subtitle" = "登录后即可查看完整内容";
+"login.username" = "账号";
+"login.password" = "密码";
+"login.submit" = "登录";
+"login.hint" = "提示：mock 模式下账号随意，密码不少于 6 位";
+"login.error.invalid" = "请输入账号，且密码不少于 6 位";
+"login.error.failed" = "登录失败，请稍后重试";
+
+"mine.title" = "我的";
+"mine.nickname" = "同学";
+"mine.signature" = "已登录（mock 账号）";
+"mine.my_posts" = "我的发布";
+"mine.settings" = "设置";
+"mine.about" = "关于";
+"mine.logout" = "退出登录";
+"mine.logout.confirm.title" = "退出登录";
+"mine.logout.confirm.message" = "退出后需要重新登录，确定继续吗？";

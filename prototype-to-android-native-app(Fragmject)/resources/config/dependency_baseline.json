@@ -1,0 +1,57 @@
+{
+  "$comment": "依赖版本基线。生成时写入 gradle/libs.versions.toml；升级前先确认 AGP/Kotlin/KSP 三者兼容",
+  "build_environment": {
+    "jdk": "17",
+    "gradle": "8.11.1",
+    "agp": "8.7.3",
+    "kotlin": "2.1.0",
+    "ksp": "2.1.0-1.0.29",
+    "compile_sdk": 35,
+    "target_sdk": 35,
+    "min_sdk": 24,
+    "note": "KSP 版本必须与 Kotlin 主版本严格对应，例如 2.1.0-1.0.29"
+  },
+  "required": [
+    { "group": "androidx.core", "artifact": "core-ktx", "version": "1.15.0", "why": "Context / Bundle 扩展" },
+    { "group": "androidx.lifecycle", "artifact": "lifecycle-runtime-ktx", "version": "2.8.7", "why": "生命周期感知协程" },
+    { "group": "androidx.lifecycle", "artifact": "lifecycle-runtime-compose", "version": "2.8.7", "why": "collectAsStateWithLifecycle" },
+    { "group": "androidx.lifecycle", "artifact": "lifecycle-viewmodel-compose", "version": "2.8.7", "why": "hiltViewModel 依赖其 ViewModel 作用域" },
+    { "group": "androidx.activity", "artifact": "activity-compose", "version": "1.9.3", "why": "ComponentActivity.setContent / enableEdgeToEdge" },
+    { "group": "androidx.compose", "artifact": "compose-bom", "version": "2024.12.01", "why": "统一 Compose 各模块版本" },
+    { "group": "androidx.compose.material3", "artifact": "material3", "version": "BOM", "why": "Material3 组件与主题" },
+    { "group": "androidx.compose.ui", "artifact": "ui-tooling-preview", "version": "BOM", "why": "@Preview 支持" },
+    { "group": "androidx.navigation", "artifact": "navigation-compose", "version": "2.8.5", "why": "单 Activity 路由" },
+    { "group": "com.google.dagger", "artifact": "hilt-android", "version": "2.53.1", "why": "依赖注入" },
+    { "group": "com.google.dagger", "artifact": "hilt-compiler", "version": "2.53.1", "why": "KSP 处理器", "scope": "ksp" },
+    { "group": "androidx.hilt", "artifact": "hilt-navigation-compose", "version": "1.2.0", "why": "hiltViewModel()" },
+    { "group": "androidx.room", "artifact": "room-runtime", "version": "2.6.1", "why": "本地缓存" },
+    { "group": "androidx.room", "artifact": "room-ktx", "version": "2.6.1", "why": "挂起 DAO" },
+    { "group": "androidx.room", "artifact": "room-compiler", "version": "2.6.1", "why": "KSP 处理器", "scope": "ksp" },
+    { "group": "androidx.datastore", "artifact": "datastore-preferences", "version": "1.1.1", "why": "token / 首次启动标记" },
+    { "group": "com.squareup.retrofit2", "artifact": "retrofit", "version": "2.11.0", "why": "HTTP 客户端" },
+    { "group": "com.squareup.okhttp3", "artifact": "okhttp", "version": "4.12.0", "why": "拦截器 / 超时" },
+    { "group": "com.squareup.okhttp3", "artifact": "logging-interceptor", "version": "4.12.0", "why": "调试期日志" },
+    { "group": "org.jetbrains.kotlinx", "artifact": "kotlinx-serialization-json", "version": "1.7.3", "why": "DTO 序列化" },
+    { "group": "com.jakewharton.retrofit", "artifact": "retrofit2-kotlinx-serialization-converter", "version": "1.0.0", "why": "Retrofit 序列化转换器" },
+    { "group": "io.coil-kt", "artifact": "coil-compose", "version": "2.7.0", "why": "图片加载" },
+    { "group": "org.jetbrains.kotlinx", "artifact": "kotlinx-coroutines-android", "version": "1.9.0", "why": "主线程调度" }
+  ],
+  "test": [
+    { "group": "junit", "artifact": "junit", "version": "4.13.2" },
+    { "group": "androidx.test.ext", "artifact": "junit", "version": "1.2.1" },
+    { "group": "androidx.test.espresso", "artifact": "espresso-core", "version": "3.6.1" }
+  ],
+  "optional": [
+    { "need": "分页库", "artifact": "androidx.paging:paging-compose", "version": "3.3.4", "note": "默认手写分页，条目复杂再引入" },
+    { "need": "Navigation 3", "artifact": "androidx.navigation3:navigation3-runtime", "version": "alpha", "note": "实验 API，用户明确要求才用" },
+    { "need": "图片裁剪", "artifact": "com.github.yalantis:ucrop", "version": "2.2.10", "note": "按需生成" },
+    { "need": "权限声明式", "artifact": "com.google.accompanist:accompanist-permissions", "version": "0.36.0", "note": "按需生成" },
+    { "need": "大屏自适应", "artifact": "androidx.compose.material3:material3-window-size-class", "version": "BOM", "note": "按需生成" }
+  ],
+  "policy": {
+    "no_kapt": "Kotlin 2.x 下 Hilt / Room 一律使用 KSP，禁止 kapt",
+    "no_annotation_processor_conflict": "不要同时引入 annotationProcessor 与 ksp 处理同一库",
+    "version_catalog_only": "依赖版本只写在 gradle/libs.versions.toml，模块脚本只引用 libs.*",
+    "buildconfig_switches": "USE_MOCK 与 BASE_URL 用 buildConfigField 区分 debug / release"
+  }
+}

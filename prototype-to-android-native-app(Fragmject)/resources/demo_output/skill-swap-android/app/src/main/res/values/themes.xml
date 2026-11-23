@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        仅作为 Activity 启动前的窗口底色，真正的主题由 Compose 的 AppTheme 控制。
+        使用系统内置主题，避免额外引入 com.google.android.material。
+    -->
+    <style name="Theme.App" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

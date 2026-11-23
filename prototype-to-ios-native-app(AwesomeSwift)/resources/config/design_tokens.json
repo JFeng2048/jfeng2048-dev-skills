@@ -1,0 +1,56 @@
+{
+  "$comment": "设计 token：颜色写入 Assets.xcassets（浅色 + 深色两套），间距/圆角写入 AppTheme，页面只引用语义值",
+  "color": {
+    "brand_primary": "{{primary_color_hex}}",
+    "brand_primary_dark": "AFC6FF",
+    "app_background_light": "F7F8FA",
+    "app_background_dark": "121418",
+    "surface_light": "FFFFFF",
+    "surface_dark": "1A1C1E",
+    "text_primary_light": "1A1C1E",
+    "text_primary_dark": "E2E2E6",
+    "text_secondary_light": "5F6368",
+    "text_secondary_dark": "C4C6CF",
+    "separator_light": "E0E3E8",
+    "separator_dark": "2C2F33",
+    "error": "BA1A1A"
+  },
+  "asset_names": {
+    "rule": "PascalCase colorset，AppTheme 里做一层语义常量映射",
+    "colorsets": ["BrandPrimary", "AppBackground", "Surface", "TextPrimary", "TextSecondary", "Separator", "AccentColor"],
+    "app_icon": "AppIcon（1024x1024，占位可后补）"
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "xxl": 32,
+    "rule": "页面外边距 16，列表项间距 12"
+  },
+  "radius": {
+    "sm": 8,
+    "md": 12,
+    "lg": 20,
+    "capsule": "Capsule()"
+  },
+  "typography": {
+    "rule": "使用系统字体与 Dynamic Type，不自定义字体文件",
+    "title": ".title2.weight(.semibold)",
+    "headline": ".headline",
+    "body": ".body",
+    "footnote": ".footnote",
+    "caption": ".caption2"
+  },
+  "image": {
+    "list_thumb": 72,
+    "avatar": 48,
+    "detail_hero": 200,
+    "rule": "KFImage 必须有 placeholder 与 error 兜底；远程图可能 403"
+  },
+  "dark_mode": {
+    "strategy": "Asset colorset 内配置 luminosity=dark 变体，AppTheme 直接用语义 Color",
+    "forbidden": "页面里禁止 if colorScheme == .dark 手动挑颜色"
+  }
+}

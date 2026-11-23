@@ -1,0 +1,41 @@
+{
+  "$comment": "依赖与工具链基线。生成时写入 project.yml 的 packages / settings；升级前确认 Xcode 版本支持",
+  "toolchain": {
+    "xcode": "15.4+（SwiftData 需要 iOS 17 SDK）",
+    "swift": "5.10",
+    "xcodegen": "2.42.0+",
+    "ios_deployment_target": "17.0",
+    "swift_strict_concurrency": "minimal",
+    "note": "Swift 6 严格并发迁移需给全局状态加 @MainActor / Sendable 标注，模板默认 5 语言模式"
+  },
+  "required_packages": [
+    { "name": "Alamofire", "url": "https://github.com/Alamofire/Alamofire", "from": "5.9.1", "why": "HTTP 客户端 / RequestInterceptor" },
+    { "name": "Kingfisher", "url": "https://github.com/onevcat/Kingfisher", "from": "7.12.0", "why": "图片加载与缓存" }
+  ],
+  "optional_packages": [
+    { "need": "Lottie 动效", "name": "Lottie", "url": "https://github.com/airbnb/lottie-ios", "from": "4.5.0" },
+    { "need": "Keychain 存 token", "name": "KeychainAccess", "url": "https://github.com/kishikawakatsumi/KeychainAccess", "from": "4.2.2" },
+    { "need": "依赖注入", "name": "Factory", "url": "https://github.com/hmlongco/Factory", "from": "2.4.0" },
+    { "need": "日志", "name": "CocoaLumberjack", "url": "https://github.com/CocoaLumberjack/CocoaLumberjack", "from": "3.8.5" }
+  ],
+  "system_frameworks": [
+    { "name": "SwiftUI", "why": "界面" },
+    { "name": "Combine", "why": "事件流（debounce / sink）" },
+    { "name": "SwiftData", "why": "本地模型与缓存" },
+    { "name": "Foundation", "why": "基础类型" }
+  ],
+  "build_config_matrix": {
+    "Debug": { "API_BASE_URL": "https://dev-api.example.com/", "USE_MOCK": "YES", "optimization": "-Onone" },
+    "Release": { "API_BASE_URL": "https://api.example.com/", "USE_MOCK": "NO", "optimization": "-O" }
+  },
+  "xcconfig_rules": {
+    "comment_syntax": "xcconfig 中 // 是注释符",
+    "url_escape": "URL 必须写成 https:/$()/host/path，$() 会被展开为空串，从而保留 //",
+    "no_secrets": "不要把 AppSecret / Token 写进 xcconfig"
+  },
+  "spm_policy": {
+    "manager": "Swift Package Manager（project.yml 的 packages 段声明）",
+    "no_cocoapods": "不生成 Podfile",
+    "version_pinning": "用 from: 指定最低版本，锁定由 Package.resolved 负责"
+  }
+}

@@ -1,0 +1,5 @@
+// 生产环境配置
+//
+// 注意：xcconfig 中 “//” 是注释符，URL 必须写成 https:/$()/host 的形式。
+API_BASE_URL = https:/$()/api.example.com/
+USE_MOCK = NO

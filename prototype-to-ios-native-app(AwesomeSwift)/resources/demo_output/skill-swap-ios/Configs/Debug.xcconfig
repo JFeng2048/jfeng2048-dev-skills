@@ -1,0 +1,8 @@
+// 开发环境配置
+//
+// 注意：xcconfig 中 “//” 是注释符，直接写 https:// 会被截断。
+// 因此用 $()（空变量）把两个斜杠隔开，展开后仍是正常的 https://。
+API_BASE_URL = https:/$()/dev-api.example.com/
+USE_MOCK = YES
+
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) DEBUG

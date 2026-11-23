@@ -1,0 +1,78 @@
+{
+  "$comment": "命名规则：生成 iOS 工程时按此表命名。与 Android 不同，工程名必须是 PascalCase 的合法 Swift 模块名",
+  "project": {
+    "project_name": {
+      "rule": "PascalCase，仅字母数字，首字母大写；同时作为目录名、Target 名、Scheme 名、模块名",
+      "regex": "^[A-Z][A-Za-z0-9]{2,}$",
+      "example": "SkillSwap",
+      "bad_examples": ["skill-swap", "skill_swap", "技能互换", "1SkillSwap"]
+    },
+    "bundle_id": {
+      "rule": "反域名，全小写点分，至少两段；与 project.yml 的 PRODUCT_BUNDLE_IDENTIFIER 完全一致",
+      "regex": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9-]*)+$",
+      "example": "com.example.skillswap"
+    },
+    "bundle_id_prefix": {
+      "rule": "bundle_id 去掉最后一段",
+      "example": "com.example"
+    },
+    "app_display_name": {
+      "rule": "Info.plist 的 CFBundleDisplayName，可中文",
+      "example": "技能互换"
+    }
+  },
+  "source_layout": {
+    "rule": "按职责分层：App / Core / Data / Features / Resources",
+    "paths": [
+      "{project}/App",
+      "{project}/Core",
+      "{project}/Data",
+      "{project}/Features",
+      "{project}/Resources"
+    ]
+  },
+  "file_naming": {
+    "app_entry": "AppEntry.swift",
+    "root_view": "RootView.swift",
+    "view": "{Feature}View.swift",
+    "viewmodel": "{Feature}ViewModel.swift",
+    "component": "{Name}.swift（放 Features/{Feature}/Components/）",
+    "protocol_repository": "{Domain}Repository.swift（协议 + Default 实现同文件）",
+    "dto": "{Domain}DTO.swift",
+    "model": "{Domain}.swift（@Model）",
+    "api_target": "APITarget.swift（枚举 + URLRequestConvertible）",
+    "theme": "AppTheme.swift",
+    "localization": "Localizable.strings（zh-Hans.lproj / en.lproj）"
+  },
+  "class_naming": {
+    "view": "PascalCase + View 后缀",
+    "viewmodel": "PascalCase + ViewModel，@MainActor ObservableObject",
+    "protocol": "名词，如 SkillRepository",
+    "implementation": "Default + 协议名，如 DefaultSkillRepository",
+    "container": "AppContainer（组合根，唯一装配处）",
+    "route": "AppRoute（enum: Hashable）",
+    "load_state": "LoadState<Value>（idle/loading/empty/loaded/failed）",
+    "constant": "static let / enum 命名空间，如 AppTheme.Spacing.md"
+  },
+  "swift_style": {
+    "access_control": "默认 internal，只有跨模块需要才 public；文件内辅助类型用 private",
+    "state": "ViewModel 用 @Published private(set) 暴露只读状态，View 用 @StateObject 持有",
+    "async": "异步入口用 async/await；Combine 只用于事件流（debounce/sink）",
+    "optionals": "禁止 ! 强解包（除常量 URL 与已知安全的 fallback），用 guard let",
+    "comments": "中文注释，类型与关键方法写 /// 文档注释",
+    "line_length": "单行不超过 120 字符"
+  },
+  "localization_keys": {
+    "rule": "点分小写，层级 = 页面.元素",
+    "examples": ["app.name", "home.title", "home.empty.title", "common.retry", "login.submit", "mine.logout"]
+  },
+  "forbidden": [
+    "手写 .xcodeproj / project.pbxproj",
+    "Storyboard / XIB / UIViewController 页面",
+    "View 里直接 import Alamofire 或调用 APIClient",
+    "ViewModel 里 import SwiftUI / Kingfisher",
+    "Color(red:green:blue:) 硬编码在 Features 下",
+    "SwiftData 模型主键命名为 id（与 Identifiable 冲突）",
+    "把 API Key 写进 Info.plist / xcconfig 提交到仓库"
+  ]
+}

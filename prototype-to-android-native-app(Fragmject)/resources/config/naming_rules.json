@@ -1,0 +1,74 @@
+{
+  "$comment": "命名规则：生成 Android 工程时按此表命名，禁止自创风格",
+  "package_name": {
+    "rule": "全小写、点分、每段以字母开头，禁止连字符与下划线",
+    "regex": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9_]*)+$",
+    "example": "com.example.skillswap",
+    "bad_examples": ["com.Example.SkillSwap", "com.example.skill-swap", "com.123.app"]
+  },
+  "package_path": {
+    "rule": "包名中的点替换为目录分隔符，源码目录必须与包名完全一致",
+    "example": "com/example/skillswap"
+  },
+  "source_dir": {
+    "rule": "使用 java 目录存放 Kotlin 源码（AGP 默认约定），不要额外配 sourceSets",
+    "example": "app/src/main/java/{{package_path}}"
+  },
+  "file_naming": {
+    "activity": "{PascalCase}Activity.kt",
+    "application": "App.kt",
+    "screen": "{Feature}Screen.kt",
+    "viewmodel": "{Feature}ViewModel.kt",
+    "uistate": "{Feature}UiState.kt",
+    "event": "{Feature}Event.kt（与 UiState 同文件或独立）",
+    "repository_interface": "{Domain}Repository.kt",
+    "repository_impl": "{Domain}RepositoryImpl.kt（可与接口同文件）",
+    "api": "{Domain}Api.kt",
+    "dto": "{Domain}Dto.kt",
+    "entity": "{Domain}Entity.kt",
+    "dao": "{Domain}Dao.kt",
+    "hilt_module": "{Layer}Module.kt"
+  },
+  "class_naming": {
+    "activity": "PascalCase + Activity 后缀，如 MainActivity",
+    "composable": "PascalCase，页面入口以 Screen 结尾，如 HomeScreen",
+    "viewmodel": "PascalCase + ViewModel，如 HomeViewModel",
+    "uistate": "不可变 data class，如 HomeUiState",
+    "event": "sealed interface，如 HomeEvent",
+    "repository": "接口 {Domain}Repository，实现 {Domain}RepositoryImpl",
+    "dto": "PascalCase + Dto，与后端字段一一对应",
+    "entity": "PascalCase + Entity，与 Room 表一一对应",
+    "constant": "const val 全大写下划线，如 PAGE_SIZE",
+    "theme_token": "PascalCase 颜色名，如 Primary / OnPrimary"
+  },
+  "kotlin_style": {
+    "compose": "Composable 函数名 PascalCase、无返回值；不要以 get/set 开头",
+    "modifier_param": "每个可复用 Composable 第一个可选参数为 modifier: Modifier = Modifier",
+    "state_holder": "内部状态用 rememberSaveable，跨页面配置变更存活",
+    "visibility": "仅页面入口 public，内部块 private",
+    "trailing_lambda": "最后一个参数为 content 时应使用尾随 lambda"
+  },
+  "routes": {
+    "rule": "集中放在 core/navigation/Routes.kt，常量全大写；带参数路由同时提供构造函数",
+    "examples": {
+      "HOME": "home",
+      "MINE": "mine",
+      "LOGIN": "login",
+      "DETAIL": "detail/{skillId}",
+      "detail_factory": "fun detail(skillId: String) = \"detail/$skillId\""
+    }
+  },
+  "resource_naming": {
+    "strings": "snake_case，如 app_name",
+    "themes": "Theme.App（保持唯一）",
+    "drawable": "ic_{name}.xml（vector）"
+  },
+  "forbidden": [
+    "Activity 里写业务逻辑",
+    "Screen 里直接调用 Retrofit / OkHttp / Api 接口",
+    "ViewModel 持有 Context 或使用 Android UI 类",
+    "在 feature 包里写 Color(0xFFxxxxxx) 硬编码颜色",
+    "同一功能同时存在 Compose 与 XML 两套页面",
+    "用 kapt 处理 Hilt / Room（Kotlin 2.x 必须 KSP）"
+  ]
+}

@@ -1,194 +1,96 @@
 # prototype-to-android-native-app
 
-## 1. 这个技能是干嘛的
+将 HTML/CSS 原型、设计稿或 PRD 转换为可运行的原生 Android 多模块工程。默认使用 Kotlin、Jetpack Compose、Gradle convention plugins，并按业务域拆分 feature `api` / `impl`。
 
-把**原型**（HTML/CSS 代码、设计图截图、PRD 页面清单）转换成**可直接用 Android Studio 打开并运行**的原生 Android 工程。
+## 架构原则
 
-模板范式对齐开源项目 **[Fragmject](https://github.com/miaowmiaow/fragmject)**（Kotlin + Compose M3 + Hilt + Navigation + Room + Retrofit + Coil，单 Activity、MVI/MVVM），并按 2025+ 稳定版本做现代化适配。
+- `app` 是组合根，只负责宿主入口、系统级组件和模块装配。
+- `core` 提供横切能力，禁止依赖任何 `feature`。
+- `feature:<domain>:impl` 依赖自身 API、必要的 core 和其他 feature 的 API；禁止依赖其他 feature 的 impl。
+- 路由与跨域能力通过稳定 API 契约连接，不硬编码跨模块实现类。
+- `build-logic` 统一构建约定，`gradle/libs.versions.toml` 集中管理插件和依赖版本。
+- Service、Receiver、Provider、IPC 和权限只在实际需要时生成，并遵守最小暴露原则。
 
-| 你提供 | 技能产出 |
+## 版本策略
+
+新工程生成时核实官方发布信息和兼容矩阵，选择当前最新的稳定兼容版本；本技能和配置不固定具体版本。生成项目将这次解析结果写入自己的 version catalog，以保证之后可复现。已有工程不自动升级。
+
+## 资源
+
+| 路径 | 用途 |
 | --- | --- |
-| 原型 HTML / 设计稿截图 / PRD 页面清单 | 完整 Gradle 工程 + 分层代码 + 四个页面范本 + mock 数据 + 单元测试 |
+| `SKILL.md` | 原型分析、工程生成、模块与组件边界、验证流程 |
+| `resources/specifications/architecture_conventions.md` | 模块职责、依赖规则、启动 DAG、Manifest 与 IPC 安全 |
+| `resources/specifications/prototype_parser_contract.md` | `proto_context.json` 数据契约 |
+| `resources/specifications/compose_mapping_rules.md` | 原型到 Compose 的映射 |
+| `resources/config/dependency_baseline.json` | 最新稳定兼容版本解析策略，不存固定版本 |
+| `resources/config/naming_rules.json` | module、源码包与 API/impl 命名边界 |
+| `resources/templates/modular_project_structure/` | app/core/feature api+impl/build-logic 多模块模板 |
+| `resources/tools/parse_prototype.py` | HTML 原型解析初稿 |
+| `resources/tools/preview_plan.py` | 展示预计生成的模块与文件 |
+| `resources/tools/render_template.py` | 渲染模块工程模板 |
+| `resources/tools/validate_project.py` | 静态校验模块结构与依赖边界 |
 
-## 2. 技术基线
-
-| 项 | 选型 |
-| --- | --- |
-| 语言 / 构建 | Kotlin 2.1 / AGP 8.7.3 / Gradle 8.11.1 / JDK 17 |
-| UI | Jetpack Compose + Material3（BOM 2024.12.01） |
-| 架构 | 单 Activity + MVI（`UiState` / `Event` / `StateFlow`） |
-| 依赖注入 | Hilt 2.53.1（KSP） |
-| 路由 | Navigation Compose 2.8.5 |
-| 本地存储 | Room 2.6.1 + DataStore Preferences |
-| 网络 | Retrofit 2.11 + OkHttp 4.12 + kotlinx.serialization |
-| 图片 | Coil 2.7 |
-| minSdk / targetSdk | 24 / 35 |
-
-> Fragmject 原文提到的 `Navigation3` 仍属实验期，本技能默认用 **Navigation Compose**；用户明确要求时才切 `androidx.navigation3`。
-
-## 3. 技能项目结构
-
-```text
-prototype-to-android-native-app/
-├── SKILL.md
-├── README.md
-└── resources/
-    ├── config/
-    │   ├── naming_rules.json           # 包名 / 类名 / 路由 / 资源命名
-    │   ├── dependency_baseline.json    # 版本基线与替代方案
-    │   └── design_tokens.json          # 颜色 / 间距 / 圆角 / 字号
-    ├── specifications/
-    │   ├── prototype_parser_contract.md  # proto_context.json 契约
-    │   ├── architecture_conventions.md   # 分层与 MVI 约定
-    │   └── compose_mapping_rules.md      # 原型 → Compose 映射
-    ├── templates/
-    │   └── project_structure/          # 可运行骨架（含四个页面范本）
-    ├── tools/
-    │   ├── parse_prototype.py          # HTML → proto_context.json
-    │   ├── preview_plan.py             # 预览生成计划
-    │   ├── render_template.py          # 按 context 渲染骨架（替换占位符 / 包路径）
-    │   └── validate_project.py         # 21 项静态校验
-    ├── demo_input/
-    │   └── index.html                  # 示例原型输入
-    └── demo_output/
-        └── skill-swap-android/         # 示例产物（已通过 21 项校验）
-```
-
-## 4. 模板里的四个页面范本
-
-| 布局 | 范本 | 关键实现 |
-| --- | --- | --- |
-| 列表 | `feature/home` | `LazyColumn` + 三态 + 触底加载 + 刷新按钮 |
-| 详情 | `feature/detail` | 可滚动内容 + 底部固定操作栏 + Toast |
-| 表单 | `feature/login` | `OutlinedTextField` + 校验 + 提交禁用 + 密码遮罩 |
-| 个人中心 / 设置 | `feature/mine` | 头像信息 + 设置行 + 退出登录二次确认 |
-
-新页面**复制改造**对应范本，不要凭空写。
-
-## 5. 工具用法
-
-### 5.1 解析原型
+## 使用
 
 ```bash
 python resources/tools/parse_prototype.py 原型.html \
   --package com.example.skillswap \
   --project skill-swap-android \
+  --domain skills \
   --title "技能互换" \
-  --out proto_context.json \
-  --min-sdk 24 \
-  --permissions INTERNET,ACCESS_NETWORK_STATE
-```
+  --min-sdk <product-min-sdk> \
+  --target-sdk <current-platform-target> \
+  --compile-sdk <current-stable-api> \
+  --jdk <compatible-jdk> \
+  --versions-json versions.json \
+  --out proto_context.json
 
-`--package` 必填且必须是合法包名；解析结果是**初稿**，重点看 `diagnostics.need_confirm`。
-
-### 5.2 预览生成计划
-
-```bash
 python resources/tools/preview_plan.py proto_context.json
-```
-
-输出包名、包路径、页面清单、计划生成的文件列表。
-
-### 5.3 校验生成结果
-
-```bash
+python resources/tools/render_template.py proto_context.json ./skill-swap-android
 python resources/tools/validate_project.py ./skill-swap-android
-python resources/tools/validate_project.py ./skill-swap-android --json
+gradle -p ./skill-swap-android validateArchitecture
 ```
 
-21 项静态检查（不依赖 Android SDK / Gradle / 网络）：
+解析产物是初稿。生成前核对页面/业务域、导航、权限和设计 token。`versions.json` 必须记录解析日期、官方来源与兼容性确认；renderer 会拒绝未解析占位符、预发布版本和动态 selector。
 
-| # | 检查项 | 失败常见原因 |
-| --- | --- | --- |
-| 1 | `settings.gradle.kts` 声明 `:app` | 骨架没复制全 |
-| 2 | 版本目录包含核心依赖 | 漏 Compose / Hilt / Room / Retrofit / Coil |
-| 3 | `namespace` 与 `applicationId` 一致 | 只改了一处，或占位符未替换 |
-| 4 | Manifest 只声明一个 Activity | 又建了第二个 Activity |
-| 5 | Application 类使用 `@HiltAndroidApp` | 忘记注解或 manifest 没指向它 |
-| 6 | `MainActivity` 用 `@AndroidEntryPoint` + `setContent` | 迁移残留 View 写法 |
-| 7 | 未使用 XML 页面布局 | 出现 `res/layout/activity_*.xml` |
-| 8 | 未混用 View 体系 | 出现 RecyclerView / Fragment |
-| 9 | 路由常量与 NavHost 注册一一对应 | 建了目录但忘记 `composable(...)` |
-| 10 | 每个页面有配套 ViewModel 与 UiState | 只有 Screen |
-| 11 | ViewModel 不依赖 Compose 与 Api | ViewModel 里 import Compose 或 Api |
-| 12 | 页面未直接访问网络层 | Screen 里 import `data.remote` |
-| 13 | Room 三件套齐全 | 缺 `@Database` / `@Dao` / `@Entity` |
-| 14 | mock 数据 ≥ 10 条 | mock 太少看不出布局问题 |
-| 15 | 列表页三态齐全 | 只有 loading |
-| 16 | 主题集中且页面无硬编码颜色 | `Color(0xFF...)` 出现在 feature |
-| 17 | 字符串资源有效 | `app_name` 为空或未替换 |
-| 18 | 存在单元测试 | `app/src/test` 为空 |
-| 19 | 包声明与包名一致 | 目录改了但 `package` 没改 |
-| 20 | 构建脚本含 mock 开关与 KSP | 用了 kapt，或缺 `buildConfigField` |
-| 21 | 无未替换占位符 | `{{package_name}}` 等残留 |
+`versions.json` 结构如下。尖括号内容仅表示字段位置，执行前必须替换为本次从官方发布信息与兼容矩阵核实的稳定版本和链接，不要复制旧项目里的版本：
 
-退出码：`0` 通过（可有警告），`1` 有 error，`2` 参数错误。
-
-## 6. 生成后如何运行
-
-1. Android Studio 打开工程目录，等待 Gradle Sync
-2. 缺 SDK 路径时，复制 `local.properties.example` 为 `local.properties` 填 `sdk.dir`
-3. 运行 `app` 到模拟器 / 真机
-
-> 仓库未内置 `gradle-wrapper.jar`（二进制文件），Android Studio 打开会自动补齐，或本机执行 `gradle wrapper --gradle-version 8.11.1`。
-
-## 7. mock 与真实接口切换
-
-```kotlin
-// app/build.gradle.kts
-debug {
-    buildConfigField("boolean", "USE_MOCK", "true")
-    buildConfigField("String", "BASE_URL", "\"https://dev-api.example.com/\"")
+```json
+{
+  "resolution": {
+    "checked_at": "YYYY-MM-DD",
+    "selection": "latest-stable-compatible",
+    "compatibility_verified": true,
+    "sources": [
+      "https://developer.android.com/build/releases/gradle-plugin",
+      "https://docs.gradle.org/current/userguide/compatibility.html",
+      "https://kotlinlang.org/docs/gradle-configure-project.html",
+      "https://github.com/google/ksp/releases",
+      "https://maven.google.com",
+      "https://repo.maven.apache.org/maven2"
+    ]
+  },
+  "versions": {
+    "gradle": "<resolved>",
+    "agp": "<resolved>",
+    "kotlin": "<resolved>",
+    "ksp": "<resolved-for-kotlin>",
+    "compose_bom": "<resolved>",
+    "core_ktx": "<resolved>",
+    "lifecycle": "<resolved>",
+    "activity_compose": "<resolved>",
+    "navigation": "<resolved>",
+    "hilt": "<resolved>",
+    "room": "<resolved>",
+    "datastore": "<resolved>",
+    "okhttp": "<resolved>",
+    "coroutines": "<resolved>",
+    "junit": "<resolved>"
+  }
 }
 ```
 
-改 `USE_MOCK = false` + 填 `BASE_URL`，再按 `data/remote/*Api.kt` 补路径即可，页面与 ViewModel 不用动。
+模板不包含 Gradle wrapper 启动脚本和 JAR；有兼容的本机 Gradle 后，可在生成项目目录执行 `gradle wrapper --gradle-version <resolved-gradle> --distribution-type bin`，之后用生成的 wrapper 编译、测试。
 
-## 8. 验证情况
-
-| 验证项 | 结果 |
-| --- | --- |
-| `parse_prototype.py` 解析 `demo_input/index.html` | 通过（layout=list，主色正确识别 `2B6DE5`，未误取背景灰） |
-| `preview_plan.py` 输出计划 | 通过（45 个文件计划，含包路径） |
-| `render_template.py` 渲染 `demo_output/skill-swap-android` | 通过（57 文件，0 残留占位符，2 个 `{{package_path}}` 目录正确展开） |
-| `validate_project.py` 校验示例工程 | **21 项全部通过：错误 0，警告 0** |
-| Kotlin 括号配平体检（全量 `.kt`） | 通过 |
-| Gradle 实际编译（`assembleDebug`） | **未执行**（本机无 Android SDK / Gradle） |
-
-因此工程**按官方 API 静态编写并通过结构校验，但未做真实编译/真机验证**。首次使用请先 `Sync` 一次；若编译报错，优先核对 `gradle/libs.versions.toml` 中 **Kotlin / KSP / AGP** 三者版本是否配套。
-
-复现验证命令：
-
-```bash
-python resources/tools/parse_prototype.py resources/demo_input/index.html \
-  --package com.example.skillswap --project skill-swap-android \
-  --title "技能互换" --page-name home --out /tmp/proto_context.json
-
-python resources/tools/render_template.py /tmp/proto_context.json \
-  resources/demo_output/skill-swap-android --force
-
-python resources/tools/validate_project.py resources/demo_output/skill-swap-android
-```
-
-## 9. 与其它技能的关系
-
-| 技能 | 目标平台 | 技术栈 |
-| --- | --- | --- |
-| **`prototype-to-android-native-app`（本技能）** | Android 原生（手机 / 平板 / 折叠屏） | Kotlin + Compose + Hilt |
-| `prototype-to-flutter-app` | Android / iOS / Web / 桌面 | Flutter（Dart） |
-| `prototype-to-app-uniappx` | App / 小程序 / H5 | uni-app x（Vue 语法） |
-| `prototype-to-taro-app` | 小程序 / H5 / RN | Taro（Vue3 或 React） |
-
-只要 **Android 原生体验**（Compose、Hilt、Room、深度系统能力）选本技能；要一套代码多端则选 Flutter / uni-app x / Taro。
-
-## 10. 相关文档
-
-| 内容 | 路径 |
-| --- | --- |
-| 技能定义（AI 读） | `SKILL.md` |
-| 原型解析契约 | `resources/specifications/prototype_parser_contract.md` |
-| 分层与 MVI 约定 | `resources/specifications/architecture_conventions.md` |
-| 原型 → Compose 映射 | `resources/specifications/compose_mapping_rules.md` |
-| 依赖基线 | `resources/config/dependency_baseline.json` |
-| Fragmject 参考 | <https://github.com/miaowmiaow/fragmject> |
-| Compose 官方文档 | <https://developer.android.com/develop/ui/compose> |
+版本核验日期必须是运行生成当天；过期 JSON 会被拒绝。来源应覆盖本工程实际使用的插件、库和兼容矩阵。静态校验不替代 Gradle Sync、测试或实际编译。若无法访问官方版本信息，可以先完成原型分析和模块计划，但不要渲染新的 Gradle 配置或声称已使用最新版本。交付时注明所有真正执行过的验证步骤。

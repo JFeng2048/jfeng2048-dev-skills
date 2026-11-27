@@ -1,6 +1,6 @@
 # 原型解析契约（proto_context.json）
 
-所有页面的生成都以 `proto_context.json` 为唯一输入。解析器（`tools/parse_prototype.py`）只产出**结构化初稿**，缺失信息标进 `diagnostics.need_confirm`，由人或模型补齐后再生码。
+解析器输出结构化初稿，不直接决定最终业务模块图。生成前必须由 agent/开发者核对业务域、路由、权限与构建版本；HTML 启发式结果不能视为产品事实。
 
 ## 1. 顶层结构
 
@@ -8,6 +8,7 @@
 {
   "project": {},
   "design": {},
+  "features": [],
   "pages": [],
   "navigation": {},
   "permissions": [],
@@ -19,102 +20,85 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `project_name` | string | ✅ | 工程名，kebab-case，同时作为 `rootProject.name` |
-| `app_title` | string | ✅ | 应用显示名，写入 `strings.xml` 的 `app_name` |
-| `package_name` | string | ✅ | 应用包名，必须匹配 `^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$` |
-| `min_sdk` | int | ✅ | 24 / 26 / 29 |
-| `target_sdk` | int | ✅ | 默认 35 |
-| `compile_sdk` | int | ✅ | 默认 35 |
-| `source_type` | string | ✅ | `html` / `image` / `prd` |
-| `language` | string | ✅ | 固定 `kotlin` |
-| `ui` | string | ✅ | 固定 `compose` |
+| `project_name` | string | 是 | Gradle root project 名，kebab-case |
+| `app_title` | string | 是 | 应用显示名，写入 app 的 `strings.xml` |
+| `package_name` | string | 是 | application 包名，匹配合法 Java package |
+| `min_sdk` | int/null | 生成前必需 | 按产品设备覆盖要求决定，不由解析器固定 |
+| `target_sdk` | int/null | 生成前必需 | 按当前平台/Google Play 要求和产品策略决定 |
+| `compile_sdk` | int/null | 生成前必需 | 使用当前可用的稳定 SDK |
+| `jdk` | string/null | 生成前必需 | 选择与当前 Gradle/AGP 兼容的 JDK |
+| `versions` | object | 生成前必需 | 本次核实出的兼容稳定版本，供模板写入 version catalog |
+| `source_type` | string | 是 | `html` / `image` / `prd` |
+| `language` | string | 是 | `kotlin` |
+| `ui` | string | 是 | `compose`，除非已有工程使用其他体系 |
+
+`versions` 的必需键为 `gradle`、`agp`、`kotlin`、`ksp`、`compose_bom`、`core_ktx`、`lifecycle`、`activity_compose`、`navigation`、`hilt`、`room`、`datastore`、`okhttp`、`coroutines`、`junit`。值必须来自生成时的官方发布信息与兼容矩阵；catalog 对 BOM 管理的 Compose artifacts 不重复声明版本。
+
+版本文件还必须包含 `resolution` 元数据：当天的 `checked_at`（`YYYY-MM-DD`）、`selection`（`latest-stable-compatible`）、`compatibility_verified`（`true`）和非空 HTTPS 官方 `sources` URL 数组。renderer 将这些来源和日期写入生成项目 README，拒绝过期、无元数据或未确认兼容的版本集。
+
+`gradle` / AGP / JDK / Kotlin / Compose / KSP / processor 必须组成可用组合。新工程生成后将已解析的具体版本写入项目文件以便复现；本契约和配置文件不提供过时固定值。已有项目优先沿用自身版本。
 
 ## 3. design
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `primary_color` | string | 6 位 hex，不带 `#`，如 `2B6DE5` |
-| `dark_theme` | bool | 是否生成暗色适配（默认 true，跟随系统） |
-| `radius_style` | string | `sm` / `md` / `lg`，映射到 `Dimens.cardRadius` |
-| `density` | string | `compact` / `comfortable`，影响列表间距 |
+| `primary_color` | string | 6 位 hex，不带 `#`；不能可靠推断时标记待确认 |
+| `dark_theme` | bool/null | 是否跟随系统适配 |
+| `radius_style` | string/null | `sm` / `md` / `lg`，需按原型校准 |
+| `density` | string/null | `compact` / `comfortable` |
 
-## 4. pages（数组，每项一个页面）
+## 4. features
+
+每个 feature 对应一个业务域，不是一个页面。由生成前的分析合并同一业务域的页面。
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `page_name` | string | ✅ | 小写 kebab，如 `home`、`order-list` |
-| `route` | string | ✅ | 路由，如 `home`、`detail/{skillId}` |
-| `screen_class` | string | ✅ | `HomeScreen` |
-| `viewmodel_class` | string | ✅ | `HomeViewModel` |
-| `layout` | string | ✅ | `list` / `detail` / `form` / `profile` / `grid` |
-| `is_home` | bool | | 是否起始页 |
-| `needs_auth` | bool | | 是否要求登录（默认 true） |
-| `components` | string[] | | 页面内组件，PascalCase |
-| `data_model` | string | | 领域模型名，如 `Skill` |
-| `data_fields` | string[] | | 字段 camelCase，用于生成模型与 mock |
-| `interactions` | object[] | | `{ "event": "tap", "action": "navigate", "to": "detail" }` |
-| `states` | string[] | | 必须含 `loading` / `empty` / `error` / `loaded` |
-| `notes` | string[] | | 视觉或业务备注 |
+| `domain` | string | 是 | 小写 kebab-case，如 `auth`、`orders` |
+| `pages` | string[] | 是 | 此业务域包含的 `pages[].page_name` |
+| `needs_android_manifest` | bool | 否 | 是否有属于本域的 Android 组件 |
+| `notes` | string[] | 否 | 模块边界或待确认项 |
 
-### layout 判定规则
+module 路径生成规则为 `:feature:<domain>:api` 与 `:feature:<domain>:impl`。按实际需要创建，不因空泛架构图生成空模块。
 
-| layout | 特征 |
-| --- | --- |
-| `list` | 重复卡片、垂直滚动、分页 |
-| `detail` | 单条内容、标题 + 正文 + 操作按钮 |
-| `form` | 多个输入控件 + 提交按钮 |
-| `profile` | 头像 + 信息区块 + 设置行 |
-| `grid` | 2~4 列宫格入口 |
+## 5. pages
 
-## 5. navigation
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `page_name` | string | 是 | 小写 kebab-case |
+| `domain` | string | 是 | 所属 feature domain |
+| `route` | string | 是 | 业务路由契约 |
+| `screen_class` | string | 是 | 如 `HomeScreen` |
+| `viewmodel_class` | string | 是 | 如 `HomeViewModel` |
+| `layout` | string | 是 | `list` / `detail` / `form` / `profile` / `grid` / `custom` |
+| `is_home` | bool | 否 | 是否为主入口 |
+| `needs_auth` | bool/null | 否 | 登录需求；不确定时不要默认强制登录 |
+| `components` | string[] | 否 | 页面内组件名 |
+| `data_model` | string | 否 | 所属业务模型 |
+| `data_fields` | string[] | 否 | 字段名，用于模型/数据分析 |
+| `interactions` | object[] | 否 | 用户动作及目标 |
+| `states` | string[] | 否 | 适用状态，如 loading/empty/error/loaded |
+| `notes` | string[] | 否 | 视觉或业务备注 |
 
-```json
-{
-  "start_destination": "home",
-  "bottom_nav": {
-    "enabled": false,
-    "items": []
-  }
-}
-```
+## 6. navigation 与 permissions
 
-- `start_destination` 必须是 `pages[].route` 中的一项
-- `bottom_nav.items` 的元素为 `{ "route": "home", "label": "首页", "icon": "Home" }`
-- 开启底部导航时，`items` 数量必须 2~5，且都在 `pages` 中出现过
+`navigation.start_destination` 引用已定义 page route。feature API 声明路由/参数契约，`:core:router` 提供通用协议，impl 注册目的地；不在 core 中维护依赖业务模块的全局硬编码路由表。
 
-## 6. permissions
-
-按需声明，**不要无理由加**：
-
-| 场景 | 权限 |
-| --- | --- |
-| 联网（几乎所有工程） | `INTERNET` |
-| 网络状态判断 | `ACCESS_NETWORK_STATE` |
-| 拍照 | `CAMERA` |
-| 选图（Android 13+） | `READ_MEDIA_IMAGES` |
-| 定位 | `ACCESS_FINE_LOCATION` |
+权限按需声明，不从模板无条件复制。动态权限需要记录触发用户动作、拒绝后的降级路径和 Android 版本差异。只有静态或跨模块需要的 URI/权限常量才进入 feature API。
 
 ## 7. diagnostics
 
-```json
-{
-  "parse_errors": [],
-  "assumptions": ["布局按关键词推断为 list"],
-  "need_confirm": ["页面跳转关系", "空态文案"],
-  "extracted_texts": ["技能广场", "暂无数据"]
-}
-```
+保留 `parse_errors`、`assumptions`、`need_confirm` 与 `extracted_texts`。任何启发式识别都放在 assumptions；module/domain、登录要求、目标 SDK、权限和外部组件导出策略不确定时放进 need_confirm。
 
-`need_confirm` 非空时，生成前必须逐条向用户确认或在输出末尾列出。
+## 8. 生成前完整性检查
 
-## 8. 完整性校验（生成前必做）
+- [ ] 包名合法，app namespace/applicationId 与目录策略一致
+- [ ] 页面 route 唯一，页面都归属真实业务域
+- [ ] 一个业务域的页面已合并到同一 feature，而不是按页面建模块
+- [ ] `features[].pages` 与 `pages[].domain` 双向一致
+- [ ] start destination 存在
+- [ ] 权限、登录和组件导出策略已核对
+- [ ] min/target/compile SDK 与 JDK 已根据项目需求决定
+- [ ] 所需版本已核实为当前最新的稳定兼容组合
+- [ ] 待确认项已回答或在交付说明中保留
 
-- [ ] `package_name` 合法且与 `package_path` 一致
-- [ ] 每个 `page.route` 唯一，且 `screen_class` 唯一
-- [ ] 每个页面 `states` 含 loading / empty / error
-- [ ] `navigation.start_destination` 存在
-- [ ] `data_fields` 至少包含 `id`
-- [ ] `design.primary_color` 为 6 位 hex
-- [ ] `need_confirm` 已处理
-
-可用 `tools/preview_plan.py` 先看生成计划，再落盘。
+先运行 `tools/preview_plan.py` 检查模块图和输出路径，再调用 renderer。

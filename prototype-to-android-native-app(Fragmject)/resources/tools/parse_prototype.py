@@ -35,6 +35,7 @@ INTERACTION_HINTS = {
 }
 
 PACKAGE_RE = re.compile(r"^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$")
+DOMAIN_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
 
 def to_pascal(name):
@@ -169,7 +170,7 @@ def extract_primary_color(html):
     return max(freq, key=lambda k: freq[k])
 
 
-def build_context(args, html):
+def build_context(args, html, versions=None, version_resolution=None):
     page_name = to_kebab(args.page_name)
     title = args.title or extract_title(html) or "首页"
     layout = guess_layout(html)
@@ -178,10 +179,23 @@ def build_context(args, html):
     data_fields = extract_data_fields(class_names)
     interactions = extract_interactions(html)
     primary = args.primary_color or extract_primary_color(html) or "2B6DE5"
+    domain = to_kebab(args.domain)
 
     screen_class = to_pascal(page_name) + "Screen"
     viewmodel_class = to_pascal(page_name) + "ViewModel"
     route = page_name
+
+    need_confirm = [
+        "页面之间的跳转关系（HTML 通常无法体现）",
+        "业务域划分和跨 feature 契约",
+        "是否需要登录与权限路由",
+        "空态 / 错误态文案",
+        "是否需要底部导航",
+    ]
+    if any(value is None for value in (args.min_sdk, args.target_sdk, args.compile_sdk)) or not args.jdk:
+        need_confirm.append("minSdk、targetSdk、compileSdk 与 JDK")
+    if not versions:
+        need_confirm.append("构建工具和依赖的最新稳定兼容版本")
 
     return {
         "project": {
@@ -191,6 +205,9 @@ def build_context(args, html):
             "min_sdk": args.min_sdk,
             "target_sdk": args.target_sdk,
             "compile_sdk": args.compile_sdk,
+            "jdk": args.jdk or None,
+            "versions": versions or {},
+            "version_resolution": version_resolution or {},
             "source_type": "html",
             "language": "kotlin",
             "ui": "compose",
@@ -204,17 +221,26 @@ def build_context(args, html):
         "pages": [
             {
                 "page_name": page_name,
+                "domain": domain,
                 "route": route,
                 "screen_class": screen_class,
                 "viewmodel_class": viewmodel_class,
                 "layout": layout,
                 "is_home": True,
-                "needs_auth": True,
+                "needs_auth": None,
                 "components": components,
                 "data_model": "Item",
                 "data_fields": data_fields,
                 "interactions": interactions,
                 "states": ["loading", "empty", "error", "loaded"],
+                "notes": [],
+            }
+        ],
+        "features": [
+            {
+                "domain": domain,
+                "pages": [page_name],
+                "needs_android_manifest": False,
                 "notes": [],
             }
         ],
@@ -228,14 +254,9 @@ def build_context(args, html):
             "assumptions": [
                 "布局按关键词频次推断为 %s" % layout,
                 "组件由 class 名启发式推断，需人工核对",
-                "主色取 HTML 中出现频次最高的 6 位 hex 值",
+                "主色优先取 CSS primary token，其次按饱和度过滤后推断",
             ],
-            "need_confirm": [
-                "页面之间的跳转关系（HTML 通常无法体现）",
-                "是否需要登录与权限路由",
-                "空态 / 错误态文案",
-                "是否需要底部导航",
-            ],
+            "need_confirm": need_confirm,
             "extracted_texts": extract_texts(html),
         },
     }
@@ -248,20 +269,30 @@ def main():
     parser.add_argument("--project", default="android-app", help="工程名（kebab-case）")
     parser.add_argument("--title", default="", help="应用标题")
     parser.add_argument("--package", required=True, help="应用包名，如 com.example.app")
-    parser.add_argument("--min-sdk", type=int, default=24, help="最低系统版本")
-    parser.add_argument("--target-sdk", type=int, default=35, help="目标系统版本")
-    parser.add_argument("--compile-sdk", type=int, default=35, help="编译系统版本")
+    parser.add_argument("--domain", default="main", help="此页面初步所属业务域；生成前应复核")
+    parser.add_argument("--min-sdk", type=int, default=None, help="最低系统版本（按设备覆盖需求确定）")
+    parser.add_argument("--target-sdk", type=int, default=None, help="目标系统版本（按当前平台要求确定）")
+    parser.add_argument("--compile-sdk", type=int, default=None, help="编译系统版本（选择当前稳定 SDK）")
+    parser.add_argument("--jdk", default="", help="与所选 Gradle/AGP 兼容的 JDK")
+    parser.add_argument(
+        "--versions-json",
+        default="",
+        help="包含 versions 和当天核验 resolution 元数据的 JSON 文件",
+    )
     parser.add_argument("--page-name", default="index", help="页面名（kebab-case）")
     parser.add_argument("--primary-color", default="", help="主色 6 位 hex，不带 #")
     parser.add_argument(
         "--permissions",
-        default="INTERNET,ACCESS_NETWORK_STATE",
+        default="",
         help="权限列表，逗号分隔（不要写无理由的权限）",
     )
     args = parser.parse_args()
 
     if not PACKAGE_RE.match(args.package):
         print("错误：包名不合法（应全小写点分，如 com.example.app）：%s" % args.package)
+        return 2
+    if not DOMAIN_RE.match(args.domain):
+        print("错误：业务域名不合法（应为小写 kebab-case）：%s" % args.domain)
         return 2
 
     html_path = Path(args.html)
@@ -270,7 +301,30 @@ def main():
         return 2
 
     html = html_path.read_text(encoding="utf-8", errors="ignore")
-    context = build_context(args, html)
+    versions = {}
+    version_resolution = {}
+    if args.versions_json:
+        versions_path = Path(args.versions_json)
+        if not versions_path.exists():
+            print("错误：版本文件不存在 %s" % versions_path)
+            return 2
+        try:
+            versions_payload = json.loads(versions_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            print("错误：版本 JSON 格式无效：%s" % error)
+            return 2
+        if not isinstance(versions_payload, dict):
+            print("错误：版本 JSON 顶层必须是对象")
+            return 2
+        versions = versions_payload.get("versions", {})
+        if not isinstance(versions, dict):
+            print("错误：版本 JSON 的 versions 必须是对象")
+            return 2
+        version_resolution = versions_payload.get("resolution", {})
+        if not isinstance(version_resolution, dict):
+            print("错误：版本 JSON 的 resolution 必须是对象")
+            return 2
+    context = build_context(args, html, versions, version_resolution)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -287,6 +341,9 @@ def main():
             "components": page["components"],
             "data_fields": page["data_fields"],
             "primary_color": context["design"]["primary_color"],
+            "domain": context["features"][0]["domain"],
+            "versions_supplied": bool(versions),
+            "version_resolution": version_resolution,
             "note": "这是初稿，请核对 diagnostics.need_confirm 中的待确认项",
         },
         ensure_ascii=False,

@@ -1,14 +1,14 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-"""校验生成的 Android 工程是否符合本技能约定。
+"""静态检查 Android 多模块工程的结构、依赖方向和组件边界。
 
-用法：
+用法:
     python validate_project.py <工程目录>
     python validate_project.py <工程目录> --json
 
-只做**静态**检查，不需要 Android SDK / Gradle / 网络。
-退出码：0 = 无阻断性错误；1 = 有 error；2 = 参数或路径错误。
+不依赖 Android SDK 或网络；静态检查不能替代 Gradle Sync、测试和编译。
+退出码: 0 = 无 error；1 = 有 error；2 = 参数或路径错误。
 """
 
 from __future__ import annotations
@@ -18,537 +18,506 @@ import re
 import sys
 from pathlib import Path
 
-SKIP_DIRS = {"build", ".gradle", ".git", ".idea", ".kotlin", "captures"}
-
-# 检查项名称（顺序即为输出顺序）
-CHECKS = [
-    "settings.gradle.kts 声明 :app 模块",
-    "版本目录包含核心依赖",
-    "namespace 与 applicationId 一致且已替换占位符",
-    "Manifest 只声明一个 Activity",
-    "Application 类使用 @HiltAndroidApp",
-    "MainActivity 使用 @AndroidEntryPoint 且 setContent",
-    "未使用 XML 页面布局",
-    "未混用 View 体系（RecyclerView / Fragment）",
-    "路由常量与 NavHost 注册一一对应",
-    "每个页面有配套 ViewModel 与 UiState",
-    "ViewModel 不依赖 Compose 与 Api",
-    "页面未直接访问网络层",
-    "Room 数据库与 DAO 存在",
-    "mock 数据不少于 10 条",
-    "列表页具备三态渲染",
-    "主题集中且页面无硬编码颜色",
-    "字符串资源有效",
-    "存在单元测试",
-    "包声明与包名一致",
-    "构建脚本含 mock 开关与 KSP",
-    "无未替换的占位符",
-]
-
+SKIP_DIRS = {"build", ".gradle", ".git", ".idea", ".kotlin", "captures", ".agents", ".codex"}
 ERROR, WARN, OK = "error", "warn", "ok"
+STABLE_VERSION_RE = re.compile(r"^\d+(?:\.\d+)*(?:-\d+(?:\.\d+)*)?$")
+REQUIRED_VERSION_KEYS_TEMPLATE = {
+    "agp", "kotlin", "ksp", "hilt", "compileSdk", "targetSdk", "minSdk", "jdk",
+    "composeBom", "coreKtx", "lifecycle", "activityCompose", "navigation", "room",
+    "datastore", "okhttp", "coroutines", "junit",
+}
+REQUIRED_VERSION_KEYS_BASE = {
+    "agp", "kotlin", "composeBom", "coreKtx", "lifecycle", "activityCompose",
+}
 
 
-# ---------------------------------------------------------------- 基础工具
 def read(path):
     try:
         return path.read_text(encoding="utf-8", errors="ignore")
-    except Exception:  # noqa: BLE001
+    except OSError:
         return ""
 
 
 def walk_files(root, suffixes=None):
-    result = []
-    for p in root.rglob("*"):
-        if not p.is_file():
-            continue
-        if any(part in SKIP_DIRS for part in p.parts):
-            continue
-        if suffixes and p.suffix.lower() not in suffixes:
-            continue
-        result.append(p)
-    return result
+    if not root.exists():
+        return []
+    return [
+        path for path in root.rglob("*")
+        if path.is_file()
+        and not any(part in SKIP_DIRS for part in path.parts)
+        and (suffixes is None or path.suffix.lower() in suffixes)
+    ]
 
 
-def read_gradle_namespace(root):
-    gradle = root / "app" / "build.gradle.kts"
-    if not gradle.exists():
-        return None
-    m = re.search(r'namespace\s*=\s*"([^"]+)"', read(gradle))
-    return m.group(1) if m else None
+def module_path(root, module):
+    if module == ":":
+        return root
+    return root.joinpath(*module.lstrip(":").split(":"))
 
 
-def read_application_id(root):
-    gradle = root / "app" / "build.gradle.kts"
-    if not gradle.exists():
-        return None
-    m = re.search(r'applicationId\s*=\s*"([^"]+)"', read(gradle))
-    return m.group(1) if m else None
+def declared_modules(root):
+    text = read(root / "settings.gradle.kts")
+    modules = set()
+    for block in re.findall(r"\binclude\s*\((.*?)\)", text, re.S):
+        modules.update(re.findall(r'["\'](:[^"\']+)["\']', block))
+    for single in re.findall(r'\binclude\s*["\'](:[^"\']+)["\']', text):
+        modules.add(single)
+    return modules, text
 
 
-def package_dir(root):
-    ns = read_gradle_namespace(root)
-    if not ns:
-        return None
-    candidate = root / "app" / "src" / "main" / "java" / Path(*ns.split("."))
-    if candidate.exists():
-        return candidate
-    # 包名被改过但目录未改的情况，用于给出更明确的错误
-    java_root = root / "app" / "src" / "main" / "java"
-    if java_root.exists():
-        for p in java_root.iterdir():
-            if p.is_dir():
-                return p
-    return None
+def project_dependencies(gradle_file):
+    return set(re.findall(r'project\(\s*["\'](:[^"\']+)["\']\s*\)', read(gradle_file)))
 
 
-# ---------------------------------------------------------------- 各检查项
-def check_gradle_settings(root, results):
-    settings = root / "settings.gradle.kts"
-    if not settings.exists():
-        results.append((CHECKS[0], ERROR, "未找到 settings.gradle.kts"))
-        return
-    text = read(settings)
-    if 'include(":app")' not in text:
-        results.append((CHECKS[0], ERROR, 'settings.gradle.kts 缺少 include(":app")'))
+def add(results, name, level, detail):
+    results.append((name, level, detail))
+
+
+def check_settings(root, results):
+    name = "settings 声明 app、core、feature（及可选 service）modules"
+    modules, text = declared_modules(root)
+    missing = []
+    if ":app" not in modules:
+        missing.append(":app")
+    for required in (":core:common", ":core:designsystem"):
+        if required not in modules:
+            missing.append(required)
+    if not re.search(r'includeBuild\(\s*["\']build-logic["\']\s*\)', text):
+        missing.append("included build-logic")
+    split_domains = sorted({
+        module.split(":")[2]
+        for module in modules
+        if re.fullmatch(r":feature:[^:]+:api", module)
+    })
+    flat_domains = sorted({
+        module.split(":")[2]
+        for module in modules
+        if re.fullmatch(r":feature:[^:]+", module)
+    })
+    for domain in split_domains:
+        for suffix in ("api", "impl"):
+            expected = ":feature:%s:%s" % (domain, suffix)
+            if expected not in modules:
+                missing.append(expected)
+    if not split_domains and not flat_domains:
+        missing.append("at least one :feature:<domain> or :feature:<domain>:api")
+    service_modules = sorted(m for m in modules if re.fullmatch(r":service:[^:]+", m))
+    if missing:
+        add(results, name, ERROR, "缺少声明：" + "、".join(missing))
     else:
-        results.append((CHECKS[0], OK, ":app 已声明"))
+        total_domains = len(set(split_domains) | set(flat_domains))
+        mode = "api/impl" if split_domains and not flat_domains else ("标准单层" if flat_domains and not split_domains else "混合")
+        add(
+            results,
+            name,
+            OK,
+            "%s 模式：%d 个 feature domain，%d 个 service，%d 个 Gradle modules"
+            % (mode, total_domains, len(service_modules), len(modules)),
+        )
+
+
+def check_build_logic(root, results):
+    name = "build-logic convention plugins 存在"
+    build_logic_dir = root / "build-logic"
+    if not build_logic_dir.is_dir():
+        add(results, name, ERROR, "缺少 build-logic 目录")
+        return
+    if not (build_logic_dir / "settings.gradle.kts").is_file():
+        add(results, name, ERROR, "缺少 build-logic/settings.gradle.kts")
+        return
+    precompiled = list((build_logic_dir / "src").rglob("*.gradle.kts")) if (build_logic_dir / "src").is_dir() else []
+    convention_plugins = list((build_logic_dir / "convention" / "src").rglob("*ConventionPlugin.kt")) if (build_logic_dir / "convention" / "src").is_dir() else []
+    if precompiled:
+        required = [
+            "build-logic/build.gradle.kts",
+            "build-logic/src/main/kotlin/android.application.gradle.kts",
+            "build-logic/src/main/kotlin/android.library.gradle.kts",
+            "build-logic/src/main/kotlin/android.compose-library.gradle.kts",
+            "build-logic/src/main/kotlin/kotlin.library.gradle.kts",
+        ]
+        missing = [item for item in required if not (root / item).is_file()]
+        if missing:
+            add(results, name, ERROR, "缺少：" + "、".join(missing))
+        else:
+            add(results, name, OK, "included build 与预编译 convention plugins 齐全")
+    elif convention_plugins and (build_logic_dir / "convention" / "build.gradle.kts").is_file():
+        add(results, name, OK, "included build 与 %d 个 ConventionPlugin 类齐全" % len(convention_plugins))
+    else:
+        add(results, name, ERROR, "未发现有效的 convention plugins（需 src/main/kotlin/*.gradle.kts 或 convention/*ConventionPlugin.kt）")
 
 
 def check_catalog(root, results):
+    name = "根 version catalog 完整且版本已解析"
     catalog = root / "gradle" / "libs.versions.toml"
-    if not catalog.exists():
-        results.append((CHECKS[1], ERROR, "未找到 gradle/libs.versions.toml"))
+    if not catalog.is_file():
+        add(results, name, ERROR, "未找到 gradle/libs.versions.toml")
         return
     text = read(catalog)
-    required = {
-        "compose-bom": "Compose BOM",
-        "material3": "Material3",
-        "hilt-android": "Hilt",
-        "room-runtime": "Room",
-        "retrofit": "Retrofit",
-        "coil-compose": "Coil",
-        "navigation-compose": "Navigation",
-    }
-    missing = [label for key, label in required.items() if key not in text]
-    if missing:
-        results.append((CHECKS[1], ERROR, "缺少依赖：%s" % "、".join(missing)))
+    required_aliases = [
+        "androidx-compose-bom",
+        "androidx-navigation-compose",
+        "androidx-core-ktx",
+    ]
+    missing = [alias for alias in required_aliases if alias not in text]
+    if "android-gradle-plugin" not in text and "android-gradlePlugin" not in text:
+        missing.append("android-gradle-plugin/android-gradlePlugin")
+    if "kotlin-gradle-plugin" not in text and "kotlin-gradlePlugin" not in text:
+        missing.append("kotlin-gradle-plugin/kotlin-gradlePlugin")
+    unresolved = "{{" in text
+    versions_block = re.search(r"(?ms)^\[versions\]\s*(.*?)(?=^\[|\Z)", text)
+    version_entries = dict(
+        re.findall(r'(?m)^\s*([\w.-]+)\s*=\s*"([^"]+)"', versions_block.group(1))
+    ) if versions_block else {}
+    is_full_template = "hilt" in version_entries and "room" in version_entries
+    required_keys = REQUIRED_VERSION_KEYS_TEMPLATE if is_full_template else REQUIRED_VERSION_KEYS_BASE
+    missing_versions = sorted(required_keys - version_entries.keys())
+    invalid_versions = sorted(
+        key for key in version_entries
+        if not STABLE_VERSION_RE.fullmatch(version_entries[key])
+    )
+    sdk_order_invalid = False
+    if all(k in version_entries for k in ("minSdk", "targetSdk", "compileSdk")):
+        try:
+            sdk_order_invalid = not (0 < int(version_entries["minSdk"]) <= int(version_entries["targetSdk"]) <= int(version_entries["compileSdk"]))
+        except ValueError:
+            sdk_order_invalid = True
+    core_ktx_has_version = re.search(
+        r'(?m)^\s*androidx-core-ktx\s*=\s*\{[^}]*version\.ref\s*=\s*"coreKtx"',
+        text,
+    )
+    if missing or unresolved or missing_versions or invalid_versions or sdk_order_invalid or not core_ktx_has_version:
+        problems = []
+        if missing:
+            problems.append("缺少别名 " + ", ".join(missing))
+        if unresolved:
+            problems.append("存在未替换占位符")
+        if missing_versions:
+            problems.append("缺少具体版本：" + ", ".join(missing_versions))
+        if invalid_versions:
+            problems.append("版本不是稳定的具体版本：" + ", ".join(invalid_versions))
+        if sdk_order_invalid:
+            problems.append("SDK 需满足 0 < minSdk <= targetSdk <= compileSdk")
+        if not core_ktx_has_version:
+            problems.append("androidx-core-ktx 缺少 coreKtx 版本引用")
+        add(results, name, ERROR, "；".join(problems))
+    elif re.search(r'(?m)^\[versions\]', text):
+        add(results, name, OK, "版本集中管理，未发现占位符或动态 selector")
     else:
-        results.append((CHECKS[1], OK, "核心依赖齐全"))
+        add(results, name, ERROR, "缺少 [versions] 表")
 
 
-def check_namespace(root, results):
-    ns = read_gradle_namespace(root)
-    app_id = read_application_id(root)
-    if not ns:
-        results.append((CHECKS[2], ERROR, "app/build.gradle.kts 未声明 namespace"))
-        return
-    if "{{" in ns:
-        results.append((CHECKS[2], ERROR, "namespace 占位符未替换：%s" % ns))
-        return
-    if app_id != ns:
-        results.append((CHECKS[2], ERROR, "namespace(%s) 与 applicationId(%s) 不一致" % (ns, app_id)))
-        return
-    if not re.match(r"^[a-z][a-z0-9]*(\.[a-z][a-z0-9_]*)+$", ns):
-        results.append((CHECKS[2], ERROR, "包名不合法：%s" % ns))
-        return
-    results.append((CHECKS[2], OK, ns))
+def check_module_build_files(root, results):
+    name = "settings 中每个 module 都有 build.gradle.kts"
+    modules, _ = declared_modules(root)
+    missing = []
+    for module in sorted(modules):
+        path = module_path(root, module) / "build.gradle.kts"
+        if not path.is_file():
+            missing.append(module)
+    if missing:
+        add(results, name, ERROR, "缺少：" + "、".join(missing))
+    else:
+        add(results, name, OK, "%d 个 modules 均有构建脚本" % len(modules))
 
 
-def check_manifest(root, results):
-    manifest = root / "app" / "src" / "main" / "AndroidManifest.xml"
-    if not manifest.exists():
-        results.append((CHECKS[3], ERROR, "未找到 AndroidManifest.xml"))
-        return
-    text = read(manifest)
-    activities = re.findall(r"<activity\b[^>]*android:name=\"([^\"]+)\"", text)
-    if len(activities) != 1:
-        results.append((CHECKS[3], ERROR, "声明了 %d 个 Activity（应为 1）：%s" % (len(activities), activities)))
-        return
-    if not activities[0].endswith("MainActivity"):
-        results.append((CHECKS[3], WARN, "Activity 不是 MainActivity：%s" % activities[0]))
-        return
-    if "android.permission.INTERNET" not in text:
-        results.append((CHECKS[3], ERROR, "缺少 INTERNET 权限"))
-        return
-    results.append((CHECKS[3], OK, "只有 MainActivity"))
-
-
-def check_app_class(root, results):
-    manifest = root / "app" / "src" / "main" / "AndroidManifest.xml"
-    text = read(manifest) if manifest.exists() else ""
-    # 只在 <application ...> 标签内找 android:name，避免误匹配权限声明
-    app_tag_match = re.search(r"<application\b[^>]*>", text)
-    app_name = ""
-    if app_tag_match:
-        m = re.search(r'android:name="([^"]+)"', app_tag_match.group(0))
-        app_name = m.group(1) if m else ""
-    if not app_name:
-        results.append((CHECKS[4], ERROR, "Manifest 的 <application> 未声明 android:name"))
-        return
-
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[4], ERROR, "找不到源码目录"))
-        return
-
-    simple = app_name.lstrip(".").split(".")[-1]
-    candidates = list(pkg_root.rglob("%s.kt" % simple))
-    if not candidates:
-        results.append((CHECKS[4], ERROR, "Manifest 指向的 Application 类不存在：%s.kt" % simple))
-        return
-    if "@HiltAndroidApp" not in read(candidates[0]):
-        results.append((CHECKS[4], ERROR, "%s.kt 缺少 @HiltAndroidApp" % simple))
-        return
-    results.append((CHECKS[4], OK, simple))
-
-
-def check_main_activity(root, results):
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[5], ERROR, "找不到源码目录"))
-        return
-    target = pkg_root / "MainActivity.kt"
-    if not target.exists():
-        results.append((CHECKS[5], ERROR, "未找到 MainActivity.kt"))
-        return
-    text = read(target)
+def check_dependency_boundaries(root, results):
+    name = "模块依赖方向无反向边"
+    modules, _ = declared_modules(root)
     problems = []
-    if "@AndroidEntryPoint" not in text:
-        problems.append("缺少 @AndroidEntryPoint")
-    if "setContent" not in text:
-        problems.append("缺少 setContent")
-    if "ComponentActivity" not in text:
-        problems.append("未继承 ComponentActivity")
+    graph = {}
+    for module in sorted(modules):
+        gradle_file = module_path(root, module) / "build.gradle.kts"
+        dependencies = project_dependencies(gradle_file)
+        graph[module] = dependencies & modules
+        for dependency in dependencies:
+            if dependency not in modules:
+                problems.append("%s 引用了未声明模块 %s" % (module, dependency))
+            if module.startswith(":core:") and (dependency.startswith(":feature:") or dependency.startswith(":service:")):
+                problems.append("%s -> %s（core 不得依赖 feature 或 service）" % (module, dependency))
+            if module.startswith(":service:") and (dependency.startswith(":feature:") or dependency == ":app"):
+                problems.append("%s -> %s（service 不得依赖 feature 或 app）" % (module, dependency))
+            if re.fullmatch(r":feature:[^:]+", module) and dependency.startswith(":feature:") and dependency != module:
+                problems.append("%s -> %s（标准模式下 feature 不得互相依赖）" % (module, dependency))
+            current = re.fullmatch(r":feature:([^:]+):(api|impl)", module)
+            target = re.fullmatch(r":feature:([^:]+):(api|impl)", dependency)
+            if current and target:
+                if current.group(2) == "api" and target.group(2) == "impl":
+                    problems.append("%s -> %s（API 不得依赖实现）" % (module, dependency))
+                if current.group(2) == "impl" and target.group(2) == "impl" and current.group(1) != target.group(1):
+                    problems.append("%s -> %s（feature impl 不得依赖其他 impl）" % (module, dependency))
+            if module != ":app" and dependency == ":app":
+                problems.append("%s -> :app（业务/core 不得依赖宿主壳）" % module)
+
+    visited = set()
+    visiting = []
+
+    def visit(module):
+        if module in visiting:
+            cycle_start = visiting.index(module)
+            cycle = visiting[cycle_start:] + [module]
+            problems.append("模块依赖环：" + " -> ".join(cycle))
+            return
+        if module in visited:
+            return
+        visiting.append(module)
+        for dependency in sorted(graph.get(module, set())):
+            visit(dependency)
+        visiting.pop()
+        visited.add(module)
+
+    for module in sorted(graph):
+        visit(module)
+
+    domains = sorted({
+        match.group(1)
+        for module in modules
+        if (match := re.fullmatch(r":feature:([^:]+):api", module))
+    })
+    for domain in domains:
+        impl = ":feature:%s:impl" % domain
+        api = ":feature:%s:api" % domain
+        if impl not in modules:
+            continue
+        if api not in project_dependencies(module_path(root, impl) / "build.gradle.kts"):
+            problems.append("%s 未依赖自身 API" % impl)
+        if impl not in project_dependencies(root / "app" / "build.gradle.kts"):
+            problems.append(":app 未装配 %s" % impl)
+    flat_features = sorted(m for m in modules if re.fullmatch(r":feature:[^:]+", m))
+    app_deps = project_dependencies(root / "app" / "build.gradle.kts")
+    for feat in flat_features:
+        if feat not in app_deps:
+            problems.append(":app 未装配 %s" % feat)
+
     if problems:
-        results.append((CHECKS[5], ERROR, "；".join(problems)))
+        add(results, name, ERROR, "；".join(problems[:12]))
     else:
-        results.append((CHECKS[5], OK, "单 Activity + Compose"))
+        add(results, name, OK, "app / feature / core / service 依赖边界通过")
 
 
-def check_no_xml_layout(root, results):
-    layout_dir = root / "app" / "src" / "main" / "res" / "layout"
-    xmls = list(layout_dir.glob("*.xml")) if layout_dir.exists() else []
-    if xmls:
-        results.append((CHECKS[6], ERROR, "存在 XML 布局：%s" % ", ".join(p.name for p in xmls[:5])))
+def check_app_identity(root, results):
+    name = "app namespace、applicationId 与 Application 类有效"
+    gradle = read(root / "app" / "build.gradle.kts")
+    manifest = read(root / "app" / "src" / "main" / "AndroidManifest.xml")
+    namespace = re.search(r'namespace\s*=\s*["\']([^"\']+)["\']', gradle)
+    app_id = re.search(r'applicationId\s*=\s*["\']([^"\']+)["\']', gradle)
+    app_class = re.search(r'<application\b[^>]*android:name=["\']([^"\']+)["\']', manifest, re.S)
+    if not namespace or not app_id or not app_class:
+        add(results, name, ERROR, "缺 namespace、applicationId 或 Manifest application android:name")
+        return
+    if "{{" in namespace.group(1) + app_id.group(1) + app_class.group(1):
+        add(results, name, ERROR, "存在未替换占位符")
+        return
+    if not re.fullmatch(r"[a-z][a-z0-9]*(?:\.[a-z][a-z0-9_]*)+", app_id.group(1)):
+        add(results, name, ERROR, "applicationId 不合法：" + app_id.group(1))
+        return
+    raw_app_name = app_class.group(1)
+    simple_app_name = raw_app_name.rsplit(".", 1)[-1]
+    app_source = root / "app" / "src" / "main"
+    source_files = walk_files(app_source, {".kt", ".java"})
+    application_declared = any(
+        re.search(r"\bclass\s+" + re.escape(simple_app_name) + r"\b", read(path))
+        and "Application" in read(path)
+        for path in source_files
+    )
+    if not application_declared:
+        add(results, name, ERROR, "未找到 Manifest 声明的 Application 类：" + raw_app_name)
+    elif app_id.group(1) == namespace.group(1):
+        add(results, name, OK, app_id.group(1))
     else:
-        results.append((CHECKS[6], OK, "全 Compose"))
+        add(results, name, OK, "applicationId 与 app namespace 分离：" + app_id.group(1))
 
 
-def check_no_view_system(root, results):
-    hits = []
-    for p in walk_files(root / "app" / "src", {".kt", ".java"}):
-        text = read(p)
-        for kw in ("RecyclerView", "androidx.fragment", "findViewById("):
-            if kw in text:
-                hits.append("%s(%s)" % (p.name, kw))
-                break
-    if hits:
-        results.append((CHECKS[7], ERROR, "混用 View 体系：%s" % ", ".join(hits[:5])))
+def check_manifest_components(root, results):
+    name = "Manifest 组件显式设置 exported"
+    manifests = walk_files(root, {".xml"})
+    components = []
+    has_launcher_activity = False
+    for path in manifests:
+        if path.name != "AndroidManifest.xml":
+            continue
+        text = read(path)
+        if "android.intent.action.MAIN" in text and "android.intent.category.LAUNCHER" in text:
+            has_launcher_activity = True
+        for tag, attrs in re.findall(r"<(activity|activity-alias|service|receiver|provider)\b([^>]*)>", text, re.S):
+            component_name = re.search(r'android:name\s*=\s*["\']([^"\']+)["\']', attrs)
+            exported = re.search(r'android:exported\s*=\s*["\'](true|false)["\']', attrs)
+            if component_name and not exported:
+                components.append("%s:%s 缺 android:exported" % (path.relative_to(root), component_name.group(1)))
+    if not has_launcher_activity:
+        components.append("未声明 LAUNCHER Activity")
+    if components:
+        add(results, name, ERROR, "；".join(components[:10]))
     else:
-        results.append((CHECKS[7], OK, "纯 Compose"))
+        add(results, name, OK, "组件导出属性显式声明；不强制单 Activity")
 
 
-def check_routes(root, results):
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[8], ERROR, "找不到源码目录"))
-        return
-    routes_file = pkg_root / "core" / "navigation" / "Routes.kt"
-    nav_file = pkg_root / "core" / "navigation" / "AppNavHost.kt"
-    if not routes_file.exists() or not nav_file.exists():
-        results.append((CHECKS[8], ERROR, "缺少 Routes.kt 或 AppNavHost.kt"))
-        return
-
-    consts = re.findall(r'const val (\w+)\s*=\s*"([^"]*)"', read(routes_file))
-    # 参数名不是路由，跳过
-    route_consts = [(n, v) for n, v in consts if not n.startswith("ARG_")]
-    nav_text = read(nav_file)
-    missing = [n for n, _ in route_consts if ("Routes.%s" % n) not in nav_text]
-    if missing:
-        results.append((CHECKS[8], ERROR, "以下路由未在 AppNavHost 注册：%s" % ", ".join(missing)))
-        return
-
-    # NavHost 中的 composable 数量应覆盖所有路由常量
-    composables = len(re.findall(r"\bcomposable\s*\(", nav_text))
-    if composables < len(route_consts):
-        results.append((CHECKS[8], WARN, "composable 数量(%d) 少于路由常量(%d)" % (composables, len(route_consts))))
-        return
-    results.append((CHECKS[8], OK, "%d 条路由均已注册" % len(route_consts)))
+def check_feature_api(root, results):
+    name = "feature api 不泄漏实现"
+    modules, _ = declared_modules(root)
+    problems = []
+    for module in sorted(modules):
+        if not re.fullmatch(r":feature:[^:]+:api", module):
+            continue
+        src = module_path(root, module) / "src"
+        for path in walk_files(src, {".kt", ".java"}):
+            text = read(path)
+            if path.name.endswith("Screen.kt") or "@Composable" in text:
+                problems.append("%s 包含 UI" % path.relative_to(root))
+            if "RepositoryImpl" in text or re.search(r"\bclass\s+\w+Repository\b", text):
+                problems.append("%s 包含 Repository 实现" % path.relative_to(root))
+    if problems:
+        add(results, name, ERROR, "；".join(problems[:10]))
+    else:
+        add(results, name, OK, "API module 仅承载跨模块契约")
 
 
-def check_screen_vm(root, results):
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[9], ERROR, "找不到源码目录"))
-        return
+def check_app_shell(root, results):
+    name = "app 不直接引用 feature impl 实现包"
+    problems = []
+    for path in walk_files(root / "app" / "src", {".kt", ".java"}):
+        if re.search(r"import\s+[\w.]+\.feature\.[\w.]+\.impl\.", read(path)):
+            problems.append(str(path.relative_to(root)))
+    if problems:
+        add(results, name, ERROR, "宿主源码直接引用实现类：" + "、".join(problems[:8]))
+    else:
+        add(results, name, OK, "宿主通过 feature entry 契约装配")
 
-    screens = [p for p in walk_files(pkg_root / "feature", {".kt"}) if p.name.endswith("Screen.kt")]
-    if not screens:
-        results.append((CHECKS[9], ERROR, "feature 下没有任何 *Screen.kt"))
-        return
 
+def check_package_namespaces(root, results):
+    name = "Android module package 与 namespace 一致"
+    modules, _ = declared_modules(root)
     problems = []
     checked = 0
-    for screen in screens:
-        base = screen.name[: -len("Screen.kt")]
-        # 启动页等纯展示页允许没有 ViewModel
-        if base in ("Splash", "Guide"):
+    for module in sorted(modules):
+        module_root = module_path(root, module)
+        gradle = read(module_root / "build.gradle.kts")
+        match = re.search(r'namespace\s*=\s*["\']([^"\']+)["\']', gradle)
+        if not match:
             continue
-        checked += 1
-        if not (screen.parent / ("%sViewModel.kt" % base)).exists():
-            problems.append("%s 缺少 %sViewModel.kt" % (screen.parent.name, base))
-        if not (screen.parent / ("%sUiState.kt" % base)).exists():
-            problems.append("%s 缺少 %sUiState.kt" % (screen.parent.name, base))
+        namespace = match.group(1)
+        if "{{" in namespace:
+            problems.append("%s namespace 有占位符" % module)
+            continue
+        for path in walk_files(module_root / "src", {".kt", ".java"}):
+            package_match = re.search(r"^\s*package\s+([\w.]+)", read(path), re.M)
+            if not package_match:
+                problems.append("%s 缺 package 声明" % path.relative_to(root))
+            elif package_match.group(1) != namespace and not package_match.group(1).startswith(namespace + "."):
+                problems.append("%s package 超出 namespace %s" % (path.relative_to(root), namespace))
+            checked += 1
     if problems:
-        results.append((CHECKS[9], ERROR, "；".join(problems)))
+        add(results, name, ERROR, "；".join(problems[:10]))
     else:
-        results.append((CHECKS[9], OK, "%d 个页面配套完整" % checked))
+        add(results, name, OK, "检查 %d 个 Android module 源文件" % checked)
 
 
-def check_vm_layering(root, results):
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[10], ERROR, "找不到源码目录"))
-        return
+def check_screen_state(root, results):
+    name = "业务页面具备 ViewModel 与 UiState"
+    modules, _ = declared_modules(root)
     problems = []
-    for p in walk_files(pkg_root / "feature", {".kt"}):
-        if not p.name.endswith("ViewModel.kt"):
+    checked = 0
+    for module in sorted(modules):
+        if not (re.fullmatch(r":feature:[^:]+:impl", module) or re.fullmatch(r":feature:[^:]+", module)):
             continue
-        text = read(p)
-        if "androidx.compose" in text:
-            problems.append("%s 引入 Compose" % p.name)
-        if re.search(r"import\s+\S+\.data\.remote\.", text):
-            problems.append("%s 直接引用 remote 层" % p.name)
-        if "import android.content.Context" in text:
-            problems.append("%s 持有 Context" % p.name)
+        src = module_path(root, module) / "src" / "main"
+        screens = [p for p in walk_files(src, {".kt"}) if p.name.endswith("Screen.kt")]
+        for screen in screens:
+            if screen.name == "FeatureHomeScreen.kt":
+                continue
+            checked += 1
+            base = screen.name[:-len("Screen.kt")]
+            all_kt = walk_files(src, {".kt"})
+            all_text = "\n".join(read(p) for p in all_kt)
+            peers = {p.name for p in all_kt}
+            if base + "ViewModel.kt" not in peers and base + "ViewModel" not in all_text:
+                problems.append("%s 缺少 ViewModel" % screen.relative_to(root))
+            if base + "UiState.kt" not in peers and base + "UiState" not in all_text:
+                problems.append("%s 缺少 UiState" % screen.relative_to(root))
     if problems:
-        results.append((CHECKS[10], ERROR, "；".join(problems)))
+        add(results, name, ERROR, "；".join(problems[:12]))
+    elif checked == 0:
+        add(results, name, WARN, "模板占位页面除外，尚未发现业务 Screen")
     else:
-        results.append((CHECKS[10], OK, "ViewModel 只依赖 Repository"))
+        add(results, name, OK, "检查 %d 个业务页面" % checked)
 
 
-def check_screen_no_api(root, results):
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[11], ERROR, "找不到源码目录"))
+def check_startup_graph(root, results):
+    name = "startup module 定义任务图边界"
+    modules, _ = declared_modules(root)
+    startup_module = root / "core" / "startup"
+    if ":core:startup" not in modules and not startup_module.is_dir():
+        add(results, name, OK, "未使用 :core:startup（跳过任务图校验）")
         return
-    problems = []
-    for p in walk_files(pkg_root / "feature", {".kt"}):
-        if not p.name.endswith("Screen.kt"):
-            continue
-        text = read(p)
-        if re.search(r"import\s+\S+\.data\.remote\.", text) or "Retrofit" in text or "OkHttpClient" in text:
-            problems.append(p.name)
-    if problems:
-        results.append((CHECKS[11], ERROR, "页面直接访问网络层：%s" % ", ".join(problems)))
+    sources = walk_files(startup_module / "src", {".kt"})
+    text = "\n".join(read(path) for path in sources)
+    if not sources:
+        add(results, name, ERROR, "缺少 :core:startup 源码")
+    elif "dependencies" not in text or "StartupTaskGraph" not in text:
+        add(results, name, ERROR, "缺少任务依赖图定义")
+    elif "cycle" not in text.lower():
+        add(results, name, WARN, "未发现依赖环校验逻辑")
     else:
-        results.append((CHECKS[11], OK, "页面只走 ViewModel"))
+        add(results, name, OK, "存在任务 DAG 与依赖环检查")
 
 
-def check_room(root, results):
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[12], ERROR, "找不到源码目录"))
-        return
-    db_files = list(walk_files(pkg_root / "data" / "local", {".kt"}))
-    if not db_files:
-        results.append((CHECKS[12], ERROR, "缺少 data/local 目录"))
-        return
-    has_db = any("@Database" in read(p) for p in db_files)
-    has_dao = any("@Dao" in read(p) for p in db_files)
-    has_entity = any("@Entity" in read(p) for p in db_files)
-    if not (has_db and has_dao and has_entity):
+def check_tests(root, results):
+    name = "存在 app 与 feature 测试"
+    modules, _ = declared_modules(root)
+    app_tests = walk_files(root / "app" / "src" / "test", {".kt", ".java"})
+    feature_tests = []
+    core_tests = []
+    for module in modules:
+        if re.fullmatch(r":feature:[^:]+:impl", module) or re.fullmatch(r":feature:[^:]+", module):
+            feature_tests.extend(walk_files(module_path(root, module) / "src" / "test", {".kt", ".java"}))
+        elif module.startswith(":core:"):
+            core_tests.extend(walk_files(module_path(root, module) / "src" / "test", {".kt", ".java"}))
+    no_test_annotation = [
+        path for path in app_tests + feature_tests + core_tests
+        if "@Test" not in read(path)
+    ]
+    if not app_tests or not feature_tests:
         missing = []
-        if not has_db:
-            missing.append("@Database")
-        if not has_dao:
-            missing.append("@Dao")
-        if not has_entity:
-            missing.append("@Entity")
-        results.append((CHECKS[12], ERROR, "Room 定义不完整，缺少：%s" % ", ".join(missing)))
+        if not app_tests:
+            missing.append("app")
+        if not feature_tests:
+            missing.append("feature")
+        level = WARN if core_tests else ERROR
+        add(results, name, level, "缺少测试：" + "、".join(missing))
+    elif no_test_annotation:
+        add(results, name, WARN, "部分测试源码未检测到 @Test")
     else:
-        results.append((CHECKS[12], OK, "Database / DAO / Entity 齐全"))
-
-
-def check_mock(root, results):
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[13], ERROR, "找不到源码目录"))
-        return
-    mock_dir = pkg_root / "data" / "mock"
-    files = list(mock_dir.glob("*.kt")) if mock_dir.exists() else []
-    if not files:
-        results.append((CHECKS[13], ERROR, "缺少 data/mock"))
-        return
-    text = "\n".join(read(p) for p in files)
-    count = 0
-    m = re.search(r"List\(\s*(\d+)\s*\)", text)
-    if m:
-        count = int(m.group(1))
-    else:
-        count = text.count("id =")
-    if count < 10:
-        results.append((CHECKS[13], ERROR, "mock 条目可能不足 10 条（检测到 %d）" % count))
-    else:
-        results.append((CHECKS[13], OK, "约 %d 条 mock 数据" % count))
-
-
-def check_states(root, results):
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[14], ERROR, "找不到源码目录"))
-        return
-    # 找列表页：ViewModel 中有 LoadMore 事件的页面
-    list_screens = []
-    for p in walk_files(pkg_root / "feature", {".kt"}):
-        if p.name.endswith("ViewModel.kt") and "LoadMore" in read(p):
-            screen = p.parent / (p.name.replace("ViewModel.kt", "Screen.kt"))
-            if screen.exists():
-                list_screens.append(screen)
-    if not list_screens:
-        results.append((CHECKS[14], WARN, "未识别到列表页（无 LoadMore 事件）"))
-        return
-    problems = []
-    for screen in list_screens:
-        text = read(screen)
-        for kw, label in (("LoadingView", "loading"), ("EmptyView", "empty"), ("ErrorView", "error")):
-            if kw not in text:
-                problems.append("%s 缺少 %s 态" % (screen.parent.name, label))
-    if problems:
-        results.append((CHECKS[14], ERROR, "；".join(problems)))
-    else:
-        results.append((CHECKS[14], OK, "%d 个列表页三态齐全" % len(list_screens)))
-
-
-def check_theme(root, results):
-    pkg_root = package_dir(root)
-    if not pkg_root:
-        results.append((CHECKS[15], ERROR, "找不到源码目录"))
-        return
-    theme_dir = pkg_root / "core" / "designsystem" / "theme"
-    if not theme_dir.exists():
-        results.append((CHECKS[15], ERROR, "缺少 core/designsystem/theme"))
-        return
-    theme_text = "\n".join(read(p) for p in theme_dir.glob("*.kt"))
-    if "MaterialTheme" not in theme_text and "lightColorScheme" not in theme_text:
-        results.append((CHECKS[15], WARN, "theme 目录未见 colorScheme 定义"))
-        return
-    hard_coded = []
-    for p in walk_files(pkg_root / "feature", {".kt"}):
-        if re.search(r"Color\(0x[0-9A-Fa-f]{8}\)", read(p)):
-            hard_coded.append(p.name)
-    if hard_coded:
-        results.append((CHECKS[15], ERROR, "页面硬编码颜色：%s" % ", ".join(hard_coded)))
-    else:
-        results.append((CHECKS[15], OK, "颜色仅存在于 theme"))
-
-
-def check_strings(root, results):
-    strings = root / "app" / "src" / "main" / "res" / "values" / "strings.xml"
-    if not strings.exists():
-        results.append((CHECKS[16], ERROR, "未找到 res/values/strings.xml"))
-        return
-    text = read(strings)
-    m = re.search(r'<string name="app_name">([^<]*)</string>', text)
-    if not m:
-        results.append((CHECKS[16], ERROR, "strings.xml 缺少 app_name"))
-        return
-    value = m.group(1).strip()
-    if not value or "{{" in value:
-        results.append((CHECKS[16], ERROR, "app_name 为空或未替换：%s" % value))
-        return
-    results.append((CHECKS[16], OK, "app_name = %s" % value))
-
-
-def check_test(root, results):
-    test_dir = root / "app" / "src" / "test"
-    files = list(test_dir.rglob("*.kt")) if test_dir.exists() else []
-    if not files:
-        results.append((CHECKS[17], ERROR, "app/src/test 下没有测试文件"))
-        return
-    if not any("@Test" in read(p) for p in files):
-        results.append((CHECKS[17], WARN, "测试文件里没有 @Test"))
-        return
-    results.append((CHECKS[17], OK, "%d 个测试文件" % len(files)))
-
-
-def check_package_decl(root, results):
-    ns = read_gradle_namespace(root)
-    pkg_root = package_dir(root)
-    if not ns or not pkg_root:
-        results.append((CHECKS[18], ERROR, "无法确定包名或源码目录"))
-        return
-    problems = []
-    for p in walk_files(pkg_root, {".kt"}):
-        m = re.search(r"^\s*package\s+([\w.]+)", read(p), re.M)
-        if not m:
-            problems.append("%s 缺少 package 声明" % p.name)
-            continue
-        pkg = m.group(1)
-        if pkg != ns and not pkg.startswith(ns + "."):
-            problems.append("%s 的 package(%s) 与 namespace 不一致" % (p.name, pkg))
-    if problems:
-        results.append((CHECKS[18], ERROR, "；".join(problems[:5])))
-    else:
-        results.append((CHECKS[18], OK, "全部与 %s 对齐" % ns))
-
-
-def check_build_flags(root, results):
-    gradle = root / "app" / "build.gradle.kts"
-    if not gradle.exists():
-        results.append((CHECKS[19], ERROR, "未找到 app/build.gradle.kts"))
-        return
-    text = read(gradle)
-    problems = []
-    if "USE_MOCK" not in text:
-        problems.append("缺少 USE_MOCK buildConfigField")
-    if "BASE_URL" not in text:
-        problems.append("缺少 BASE_URL buildConfigField")
-    if "ksp(" not in text:
-        problems.append("未使用 ksp")
-    if "kapt(" in text or "kotlin-kapt" in text:
-        problems.append("使用了 kapt")
-    if problems:
-        results.append((CHECKS[19], ERROR, "；".join(problems)))
-    else:
-        results.append((CHECKS[19], OK, "mock 开关 + KSP"))
+        add(results, name, OK, "%d 个测试源码文件" % (len(app_tests) + len(feature_tests)))
 
 
 def check_placeholders(root, results):
-    suffixes = {".kt", ".kts", ".xml", ".toml", ".properties", ".md", ".pro", ".json"}
-    leftovers = []
-    for p in walk_files(root, suffixes):
-        if "{{" in read(p):
-            leftovers.append(str(p.relative_to(root)))
+    name = "工程无未替换模板占位符"
+    text_suffixes = {".kt", ".kts", ".xml", ".toml", ".properties", ".md", ".pro", ".json"}
+    leftovers = [
+        str(path.relative_to(root))
+        for path in walk_files(root, text_suffixes)
+        if "{{" in read(path)
+    ]
     if leftovers:
-        results.append((CHECKS[20], ERROR, "占位符未替换：%s" % ", ".join(leftovers[:8])))
+        add(results, name, ERROR, "仍有占位符：" + "、".join(leftovers[:12]))
     else:
-        results.append((CHECKS[20], OK, "无残留占位符"))
+        add(results, name, OK, "无未替换占位符")
 
 
-# ---------------------------------------------------------------- 主流程
 def run(root):
     results = []
-    check_gradle_settings(root, results)
+    check_settings(root, results)
+    check_build_logic(root, results)
     check_catalog(root, results)
-    check_namespace(root, results)
-    check_manifest(root, results)
-    check_app_class(root, results)
-    check_main_activity(root, results)
-    check_no_xml_layout(root, results)
-    check_no_view_system(root, results)
-    check_routes(root, results)
-    check_screen_vm(root, results)
-    check_vm_layering(root, results)
-    check_screen_no_api(root, results)
-    check_room(root, results)
-    check_mock(root, results)
-    check_states(root, results)
-    check_theme(root, results)
-    check_strings(root, results)
-    check_test(root, results)
-    check_package_decl(root, results)
-    check_build_flags(root, results)
+    check_module_build_files(root, results)
+    check_dependency_boundaries(root, results)
+    check_app_identity(root, results)
+    check_manifest_components(root, results)
+    check_feature_api(root, results)
+    check_app_shell(root, results)
+    check_package_namespaces(root, results)
+    check_screen_state(root, results)
+    check_startup_graph(root, results)
+    check_tests(root, results)
     check_placeholders(root, results)
     return results
 
@@ -557,47 +526,40 @@ def main():
     if len(sys.argv) < 2:
         print("用法: python validate_project.py <工程目录> [--json]")
         return 2
-
     root = Path(sys.argv[1]).resolve()
     as_json = "--json" in sys.argv[2:]
-
     if not root.exists() or not root.is_dir():
         print("错误：目录不存在 %s" % root)
         return 2
 
     results = run(root)
-    errors = [r for r in results if r[1] == ERROR]
-    warnings = [r for r in results if r[1] == WARN]
-
+    errors = [item for item in results if item[1] == ERROR]
+    warnings = [item for item in results if item[1] == WARN]
     if as_json:
-        print(json.dumps(
-            {
-                "root": str(root),
-                "total": len(results),
-                "errors": len(errors),
-                "warnings": len(warnings),
-                "items": [
-                    {"check": c, "level": lv, "detail": d} for c, lv, d in results
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ))
+        print(json.dumps({
+            "root": str(root),
+            "total": len(results),
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "items": [
+                {"check": check, "level": level, "detail": detail}
+                for check, level, detail in results
+            ],
+        }, ensure_ascii=False, indent=2))
     else:
-        icons = {OK: "OK  ", WARN: "WARN", ERROR: "ERR "}
+        labels = {OK: "OK  ", WARN: "WARN", ERROR: "ERR "}
         print("工程：%s" % root)
-        print("-" * 78)
+        print("-" * 92)
         for check, level, detail in results:
-            print("[%s] %-42s %s" % (icons[level], check, detail))
-        print("-" * 78)
+            print("[%s] %-42s %s" % (labels[level], check, detail))
+        print("-" * 92)
         print("共 %d 项：错误 %d 项，警告 %d 项" % (len(results), len(errors), len(warnings)))
         if errors:
-            print("结论：未通过，请修复上述 ERR 项后重试。")
+            print("结论：未通过，请修复 ERR 项后重试。")
         elif warnings:
             print("结论：通过（有警告，建议复核）。")
         else:
             print("结论：全部通过。")
-
     return 0 if not errors else 1
 
 

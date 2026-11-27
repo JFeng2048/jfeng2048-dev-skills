@@ -1,366 +1,170 @@
 ---
 name: "prototype-to-android-native-app"
-description: "从原型（HTML/CSS 代码、设计图截图或 PRD 页面清单）生成可直接用 Android Studio 打开并运行的原生 Android 工程骨架：Kotlin + Jetpack Compose Material3 + Hilt + Navigation Compose + Room + Retrofit + Coil，单 Activity + MVI/MVVM 分层，内置登录、权限路由、分页列表、下拉刷新、表单、设置、暗色主题、全局异常与 mock 数据。用户提到「原型转 Android」「生成 Android 原生项目」「Compose 脚手架」「照这个页面做安卓 App」「Kotlin 起步工程」时使用。"
+description: "从 HTML/CSS 原型、设计稿或 PRD 生成可运行的原生 Android 多模块工程，默认采用 Kotlin、Jetpack Compose、build-logic convention plugins，以及 app / feature / core / service 分层架构（兼容标准扁平 feature/<domain> 与大型工程 feature/<domain>/{api,impl}）。用户提到「原型转 Android」「生成 Android 原生项目」「Compose 工程」「把原型做成 Kotlin App」时使用。"
 ---
 
 # Prototype to Android Native App
 
-## 概述
+## 目标与原则
 
-把**原型**转换成**能直接 `Run` 的原生 Android 工程**，一套 Kotlin + Compose 代码跑手机、平板与折叠屏。
+将原型中的页面、交互和视觉规则落成可运行、可维护的 Android 原生工程。先读取工作区已有工程和原型；已有工程优先沿用其包名、构建基线和用户已有模块，不覆盖或强行迁移无关代码。新建工程默认采用本文的多模块结构。
 
-**模板来源**：工程范式对齐开源项目 **Fragmject**（Kotlin + Compose M3 + Hilt + Navigation + Room + Retrofit + Coil，单 Activity、MVI/MVVM、内置登录/列表/表单/设置），并按 2025+ 的稳定版本做了现代化适配：
+原型是产品行为和视觉的输入，不是照搬 HTML 的布局实现。保留用户可见流程、信息层级、状态与交互反馈；将布局、导航、权限和生命周期转换为 Android 原生模式。信息不明确时列出待确认项，不臆造业务规则。
 
-| 参考要点（Fragmject） | 本技能落地方式 |
-| --- | --- |
-| 单 Activity + Compose | ✅ `MainActivity` 唯一 Activity，`setContent` 挂根组件 |
-| MVI / MVVM | ✅ 每页 `XxxUiState` + `XxxViewModel` + `StateFlow`，单向数据流 |
-| Hilt 依赖注入 | ✅ `@HiltAndroidApp` + `@AndroidEntryPoint` + `@HiltViewModel`，KSP 编译 |
-| Navigation | ✅ Navigation Compose 类型安全路由表（`Routes` 对象） |
-| Room 本地缓存 | ✅ 远端成功写库，请求失败回读缓存 |
-| Retrofit + 统一响应 | ✅ `ApiResponse<T>` + kotlinx.serialization + 拦截器注入 token |
-| Coil 图片 | ✅ `AsyncImage` 统一占位与错误兜底 |
-| 内置页面 | ✅ 登录 / 列表 / 详情 / 我的（设置入口） |
-| 中文注释 | ✅ 全量中文注释与文案 |
-| 权限、拍照选图、裁剪、沉浸式、大屏适配 | ⚠️ **按需生成**，模板预留接缝（见「内置能力」） |
+## 推荐工程结构
 
-> ⚠️ **版本基线以稳定可编译为准**。Fragmject 原文提到的 `Navigation3` 仍属实验期，本技能默认用 **Navigation Compose**；用户明确要求 Navigation 3 时，再换成 `androidx.navigation3` 并按官方迁移指南生成。
+按业务域拆分 `feature/`；公共基础能力归 `core/`；独立系统服务归 `service/`（按需）；`app/` 只负责组装与导航编排。模块应有真实职责，不为凑树形结构创建空目录或空 Gradle module。跨进程 IPC、Service、Receiver 和 Provider 只在业务确实需要时实现。
 
----
-
-## 前置决策（开工前必须确认）
-
-**先把下面 5 项问清楚再动手，不要自行假设。**
-
-| # | 决策项 | 可选值 | 默认行为 |
-| --- | --- | --- | --- |
-| 1 | **应用包名** | `com.公司.应用`（全小写） | 必问，不猜 |
-| 2 | **工程名 / 应用标题** | `skill-swap-android` / `技能互换` | 必问 |
-| 3 | 最低系统版本 `minSdk` | 24 / 26 / 29 | 24（覆盖 99%+ 设备） |
-| 4 | 是否需要登录与权限路由 | 是 / 否 | 是 |
-| 5 | 是否启用 Room 本地缓存 | 是 / 否 | 是 |
-| 6 | 是否要底部导航（首页 / 我的） | 是 / 否 | 否（模板用顶部入口） |
-| 7 | 是否要暗色主题 | 跟随系统 / 固定浅色 | 跟随系统 |
-| 8 | 是否要多模块（`:core` / `:feature`） | 是 / 否 | 否（单模块，后续可拆） |
-
-**包名红线**：必须是合法 Java 包名（小写、点分层、不以数字开头），生成后 `namespace`、`applicationId`、目录路径三者必须一致。
-
----
-
-## 技术基线
-
-| 项 | 版本 / 选型 |
-| --- | --- |
-| 语言 | Kotlin 2.1+（K2 编译器） |
-| UI | Jetpack Compose + Material3（BOM 管理版本） |
-| 构建 | AGP 8.7+ / Gradle 8.11+ / JDK 17 |
-| 依赖注入 | Hilt 2.53+（**KSP**，禁止 `kapt`） |
-| 路由 | Navigation Compose 2.8+（单 Activity） |
-| 本地存储 | Room 2.6+；登录态用 DataStore Preferences |
-| 网络 | Retrofit 2.11 + OkHttp 4.12 + kotlinx.serialization |
-| 图片 | Coil 2.7（Compose） |
-| 异步 | Kotlin Coroutines + Flow |
-| 架构 | 单 Activity + MVI（`UiState` / `Event` / 单向数据流） |
-
----
-
-## 工程结构
+### 默认标准结构（`app` + `feature` + `core` + `service` + `build-logic`）
 
 ```text
-{{project_name}}/
+<ProjectRoot>/
+├── app/                        # 应用入口：Application、MainActivity、NavHost 与全局 DI 装配
+│
+├── feature/                    # 产品功能（每个 <domain> 为独立模块，或按需拆分为 api/impl）
+│   └── <domain>/               # 如 camera / gallery / reveal / studio-gif / studio-splitter / studio-video
+│
+├── core/                       # 公共基础能力（只按实际需要创建对应模块）
+│   ├── common/                 # 协程调度器、Result 封装、通用工具扩展（纯 Kotlin）
+│   ├── model/                  # 领域模型、枚举与稳定跨模块数据结构（纯 Kotlin）
+│   ├── data/                   # Repository 实现：协调 database / network / storage
+│   ├── database/               # Room / Bundled SQLite、DAO、迁移与种子数据
+│   ├── designsystem/           # 主题、设计 token、基础 Compose 组件
+│   ├── ui/                     # 跨 feature 复用的业务 UI 组件与状态容器
+│   ├── camera/                 # 相机系统能力（按需）
+│   ├── media/                  # 媒体处理能力：滤镜、切块、编解码等（按需）
+│   ├── image/                  # 图像处理引擎（按需）
+│   ├── sensor/                 # 传感器能力（按需）
+│   ├── storage/                # 文件与媒体存储、MediaStore 导出、DataStore（按需）
+│   ├── network/                # HTTP 客户端、鉴权刷新、重试退避（按需）
+│   ├── worker/                 # WorkManager 后台调度与状态回写（按需）
+│   └── ...                     # 其他横切基础设施（如 router / startup / monitor / ads 等按需引入）
+│
+├── service/                    # 独立系统服务：前台服务、后台长任务、Bound/IPC Service（按需）
+│
+├── build-logic/                # 构建逻辑：convention plugins 与架构校验
+├── gradle/
+│   └── libs.versions.toml                      # 集中依赖与插件版本
+├── docs/                       # PRD、原型、数据库设计与开发计划（如已有则保留）
+├── AGENTS.md                   # 仓库协作规范（如已有则保留）
 ├── settings.gradle.kts
-├── build.gradle.kts                # 根构建脚本（插件统一声明）
-├── gradle.properties
-├── gradle/libs.versions.toml       # 版本目录（唯一依赖版本源）
-├── local.properties.example
-├── app/
-│   ├── build.gradle.kts            # namespace / applicationId / buildConfig
-│   ├── proguard-rules.pro
-│   └── src/
-│       ├── main/
-│       │   ├── AndroidManifest.xml          # 只声明一个 Activity
-│       │   ├── res/values/strings.xml
-│       │   ├── res/values/themes.xml
-│       │   └── java/{{package_path}}/
-│       │       ├── App.kt                    # @HiltAndroidApp
-│       │       ├── MainActivity.kt           # 唯一 Activity
-│       │       ├── core/
-│       │       │   ├── config/AppConfig.kt
-│       │       │   ├── datastore/TokenStore.kt
-│       │       │   ├── designsystem/
-│       │       │   │   ├── theme/{Color,Type,Theme,Dimens}.kt
-│       │       │   │   └── component/{StateViews,AppTopBar}.kt
-│       │       │   └── navigation/{Routes,AppNavHost}.kt
-│       │       ├── data/
-│       │       │   ├── model/Skill.kt
-│       │       │   ├── remote/{SkillApi,AuthApi}.kt + remote/dto/
-│       │       │   ├── local/{AppDatabase}.kt + local/{entity,dao}/
-│       │       │   ├── mock/MockData.kt
-│       │       │   └── repository/{SkillRepository,AuthRepository}.kt
-│       │       ├── di/{NetworkModule,DatabaseModule,RepositoryModule}.kt
-│       │       └── feature/                  # 按业务切分，不按技术层平铺
-│       │           ├── root/{RootViewModel,SplashScreen}.kt
-│       │           ├── home/{HomeScreen,HomeViewModel,HomeUiState}.kt
-│       │           │   └── components/SkillCard.kt
-│       │           ├── detail/{DetailScreen,DetailViewModel,DetailUiState}.kt
-│       │           ├── login/{LoginScreen,LoginViewModel,LoginUiState}.kt
-│       │           └── mine/{MineScreen,MineViewModel,MineUiState}.kt
-│       └── test/java/{{package_path}}/      # 至少一个可跑单测
+├── build.gradle.kts
+└── gradle.properties
 ```
 
-**四层硬规则**：
+> **结构模式选择**：
+> - **标准模式（默认优先，如 Luma）**：每个 `:feature:<domain>` 为单个 Gradle module，直接依赖 `:core:*`；页面路由由 `:app` 中的 NavHost 协调，跨域数据与契约由 `:core:model` / `:core:data` 承接。
+> - **API/Impl 拆分模式（按需）**：当同一业务域存在跨 feature 强契约调用、独立动态交付或需要隔离编译边界时，才将 `:feature:<domain>` 拆为 `:feature:<domain>:api` + `:feature:<domain>:impl`；不要在小型或单体聚合应用中机械空转套娃。
+> - **`service/` 模块**：当系统存在独立生命周期的前台服务、媒体后台导出服务、跨进程 Bound Service 或系统推送/同步服务时，放入 `service/<name>/`（如 `:service:media-export`），由 `:app` 装配或通过 `:core:*` 接口解耦。
 
-1. `feature/*Screen` **只读 UiState、只发 Event**，不写业务、不碰网络
-2. `XxxViewModel` **只调 Repository**，不 import Compose、不持有 `Context`
-3. `data/repository` 是**唯一数据接缝**，mock 与真实接口切换只改这里 + `AppConfig`
-4. `data/remote`、`data/local` 只被 Repository 使用，Screen 禁止直接 import
+每个 Gradle module 有自己的 `build.gradle.kts`。`build-logic` 可作为 included build，按应用、Android library、Compose library、Feature library、纯 Kotlin library 等角色提供 convention plugins。
 
----
-
-## 使用流程
-
-### 步骤 1：解析原型 → 页面清单
-
-从设计图 / HTML / PRD 中抽出页面，字段见下表：
-
-| 字段 | 示例 |
-| --- | --- |
-| `page_name` | `home` |
-| `route` | `home` / `detail/{skillId}` |
-| `screen_class` | `HomeScreen` |
-| `viewmodel_class` | `HomeViewModel` |
-| `layout` | `list` / `detail` / `form` / `profile` / `grid` |
-| `components` | `SkillCard`, `EmptyView` |
-| `data_fields` | `id`, `title`, `author`, `price` |
-| `interactions` | 点击跳转、下拉刷新、上拉加载、表单提交 |
-
-机器可读中间产物按 `resources/specifications/prototype_parser_contract.md` 输出 `proto_context.json`；HTML 输入可直接用 `resources/tools/parse_prototype.py` 生成初稿。
-
-### 步骤 2：确认视觉与交互
-
-必须问清：**主色 hex**、圆角风格、是否暗色、是否需要底部导航、列表是否分页、空态/错误文案、登录方式（手机号 / 账号密码 / 第三方）。
-
-推断不出来就列入「待确认」，**不要静默臆造**。
-
-### 步骤 3：生成工程骨架
-
-从 `resources/templates/project_structure/` 整目录复制，替换占位符（也可用 `resources/tools/render_template.py` 一键完成）：
-
-| 占位符 | 含义 | 示例 |
-| --- | --- | --- |
-| `{{project_name}}` | 工程名（kebab-case） | `skill-swap-android` |
-| `{{app_name}}` | 应用标题（显示名） | `技能互换` |
-| `{{package_name}}` | 应用包名 | `com.example.skillswap` |
-| `{{package_path}}` | 包名路径（目录名） | `com/example/skillswap` |
-| `{{primary_color_hex}}` | 主色（不含 `#`） | `2B6DE5` |
-| `{{min_sdk}}` | 最低系统版本 | `24` |
-| `{{compile_sdk}}` / `{{target_sdk}}` | 编译 / 目标版本 | `35` |
-
-**目录改名必须做**：把 `app/src/main/java/{{package_path}}/` 改名为真实路径，否则包声明与目录不一致。
-
-### 步骤 4：生成页面
-
-按布局选范式（模板已内置四个范本，**复制改造**而不是凭空写）：
-
-| 布局 | 参照模板 | 关键实现 |
-| --- | --- | --- |
-| 列表 | `feature/home` | `LazyColumn` + 三态 + 上拉加载 + 手动刷新 |
-| 详情 | `feature/detail` | `Column` + `verticalScroll` + 底部操作栏 |
-| 表单 | `feature/login` | `OutlinedTextField` + 校验 + 提交态禁用 |
-| 个人中心 / 设置 | `feature/mine` | 头部信息 + 设置行 + 退出登录 |
-
-每个页面**必须**：
-
-- 有 `XxxScreen.kt`（唯一 `@Composable` 入口）+ `XxxViewModel.kt` + `XxxUiState.kt`
-- 在 `Routes` 里声明 route 常量（带参数用 `fun xxx(id: String): String`）
-- 在 `AppNavHost` 里 `composable(...)` 注册
-- 三态齐全：`isLoading` / `empty` / `error`
-- 文案中文，注释中文
-
-### 步骤 5：接入状态与数据
-
-```kotlin
-// ViewModel：单向数据流
-private val _uiState = MutableStateFlow(HomeUiState())
-val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
-
-fun onEvent(event: HomeEvent) = when (event) {
-    HomeEvent.Refresh -> refresh()
-    HomeEvent.LoadMore -> loadMore()
-    HomeEvent.Retry -> refresh()
-}
-```
-
-```kotlin
-// Screen：只订阅状态 + 派发事件
-val state by viewModel.uiState.collectAsStateWithLifecycle()
-HomeContent(state = state, onRefresh = { viewModel.onEvent(HomeEvent.Refresh) })
-```
-
-### 步骤 6：填充 mock 数据
-
-`data/mock/MockData.kt` 必须给出与真实接口**同形状**的数据：
-
-- 列表 ≥ 10 条（撑满一屏并触发分页）
-- 至少 1 条超长标题、1 条空 `tags`、1 条超长描述
-- 用 `delay(300)` 模拟网络延迟，让 Loading 态可见
-- 分页函数 `pageSkills(page, pageSize)` 与真实分页语义一致
-
-### 步骤 7：自检
-
-运行 `resources/tools/validate_project.py`，必须 **0 error**：
-
-```bash
-python resources/tools/validate_project.py ./skill-swap-android
-```
-
-共 21 项检查（清单见 `README.md` 第 5.3 节）；有 error 就修，不要靠肉眼。
-
----
-
-## 原型 → Compose 映射（最易错）
-
-| 原型写法 | Compose 写法 | 说明 |
-| --- | --- | --- |
-| `flex-direction: column` | `Column` | 垂直排列 |
-| `flex-direction: row` | `Row` | 水平排列 |
-| `position: absolute` | `Box` + `Modifier.align` | 不要用 `offset` 硬凑 |
-| `display: grid` | `LazyVerticalGrid` | 或 `Row` + `FlowRow` |
-| 长列表 / `v-for` | `LazyColumn` + `items(key = { it.id })` | 禁止 `Column` + `forEach` |
-| `border-radius` | `RoundedCornerShape(12.dp)` | 走 theme 的 `Dimens` |
-| `box-shadow` | `Modifier.shadow(elevation, shape)` 或 `Card` | 优先 `Card` |
-| `linear-gradient` | `Brush.linearGradient` + `Modifier.background` | |
-| `<img>` | `AsyncImage(model = url)`（Coil） | 必填 `placeholder` / `error` |
-| `<input>` | `OutlinedTextField` | 配 `KeyboardOptions` |
-| 固定 `px` | `dp` / `sp` | 禁止写裸数字，走 `Dimens` |
-| `:hover` / `:active` | `InteractionSource` 或 `clickable` 波纹 | 移动端无 hover |
-| CSS 动画 | `animate*AsState` / `AnimatedVisibility` | |
-| 滚动吸顶 Header | `LazyColumn` 的 `stickyHeader` | 实验 API 需 `@OptIn` |
-
-**视觉基线**：Material3 组件 + 8dp 间距栅格 + 12dp 卡片圆角；主色只出现在 `theme/Color.kt`，页面里**禁止**出现 `Color(0xFF...)`。
-
----
-
-## 内置能力（生成时一并产出）
-
-| 能力 | 落点 | 状态 |
-| --- | --- | --- |
-| 登录 + token 持久化 | `feature/login` + `core/datastore/TokenStore` | ✅ 默认生成 |
-| 权限路由（未登录跳登录） | `feature/root/RootViewModel` + `MainActivity` 起始页判定 | ✅ |
-| 统一请求封装 + 401 处理 | `core/network` + `data/remote` | ✅ |
-| 分页列表 + 上拉加载 + 下拉刷新 | `feature/home` | ✅ |
-| 表单校验与提交反馈 | `feature/login` 范式 | ✅ |
-| 设置页 / 个人中心 | `feature/mine` | ✅ |
-| 暗色主题 | `theme/Theme.kt` 跟随系统 | ✅ |
-| 全局异常捕获 | `Thread.setDefaultUncaughtExceptionHandler` + 请求层兜底 | ✅ |
-| 沉浸式状态栏 | `enableEdgeToEdge()` + `Scaffold` 内边距 | ✅ |
-| Room 缓存 | `data/local` + Repository 回落 | ✅ |
-| 拍照 / 选图 / 裁剪 | 权限 + `ActivityResultContracts` | ⚠️ 按需生成 |
-| 动态权限封装 | `core/permission` | ⚠️ 按需生成 |
-| 大屏 / 折叠屏自适应 | `WindowSizeClass` + 双栏列表详情 | ⚠️ 按需生成 |
-| 引导页 | `feature/guide` + DataStore 首次标记 | ⚠️ 按需生成 |
-| 底部导航 | `Scaffold` + `NavigationBar` + 嵌套 NavHost | ⚠️ 按需生成 |
-
-⚠️ 项必须**用户明确要求**才生成，并且要说明新增的依赖与权限。
-
----
-
-## 命名规范
-
-| 对象 | 规则 | 示例 |
-| --- | --- | --- |
-| 包名 | 全小写点分 | `com.example.skillswap` |
-| 目录 | 全小写，按功能 | `feature/home/` |
-| Activity | PascalCase，后缀 `Activity` | `MainActivity` |
-| 页面 Composable | PascalCase + `Screen` | `HomeScreen` |
-| 页面内部块 | private + `Content` | `HomeContent` |
-| ViewModel | `<页面>ViewModel` | `HomeViewModel` |
-| UiState | `<页面>UiState` | `HomeUiState` |
-| Event | `<页面>Event`（sealed interface） | `HomeEvent` |
-| Repository | `<领域>Repository` + `Impl` | `SkillRepositoryImpl` |
-| API 接口 | `<领域>Api` | `SkillApi` |
-| DTO | `<领域>Dto` | `SkillDto` |
-| 实体 | `<领域>Entity` | `SkillEntity` |
-| 路由常量 | 大写下划线 | `Routes.HOME` |
-
----
-
-## 输出格式
+## 模块依赖硬规则
 
 ```text
-✅ 已生成 Android 工程：{{project_name}}（Kotlin + Compose M3 + Hilt + Room + Retrofit）
-
-📁 结构
-├── app/src/main/java/{{package_path}}/core/      主题、网络、导航、DataStore
-├── app/src/main/java/{{package_path}}/data/      模型、DTO、Room、Repository、mock
-├── app/src/main/java/{{package_path}}/di/        Hilt 模块
-└── app/src/main/java/{{package_path}}/feature/   {{N}} 个功能模块
-
-🎨 已还原
-- 页面：登录 / 列表 / 详情 / 我的
-- 交互：点击跳转、上拉加载、表单校验、退出登录
-- 主题：Material3，主色 {{primary_color}}
-
-▶️ 如何运行
-1. 用 Android Studio 打开工程目录
-2. 首次打开等待 Gradle Sync（首次会下载依赖）
-3. 选择 app 运行到模拟器或真机
-（mock 已内置，无需后端）
-
-🔌 如何对接后端
-1. app/build.gradle.kts 的 buildConfigField USE_MOCK 改为 false
-2. 修改 BASE_URL
-3. 按 data/remote/*Api.kt 补真实路径
-
-⚠️ 待确认
-- 各列表页的真实字段
-- 空态文案
-- 是否需要底部导航
+:app ───────────────> :core:*、:service:* 与需要装配的 :feature:*
+:feature:* ─────────> 必需的 :core:*（标准模式，feature 之间禁止互相依赖）
+:feature:A:impl ────> :feature:A:api 与 :feature:B:api（仅 API/Impl 拆分模式）
+:service:* ─────────> 必需的 :core:*（独立系统服务不得反向依赖 :feature:* 或 :app）
+:core:* ────────────> :core:*（单向依赖）
 ```
 
----
+- `core` 禁止依赖任何 `feature` 或 `service`；`core` 不导入页面实现、导航目标或业务 UI。
+- `feature` 之间禁止直接互相依赖（标准模式下 `:feature:A` 不得依赖 `:feature:B`，页面跳转由 `:app` NavHost 协调，跨域数据通过 `:core:model` 与 `:core:data` 共享）。
+- `feature:<domain>:impl` 只能依赖自己的 `api`、必要的 `core` 和其他 feature 的 `api`；禁止依赖其他 feature 的 `impl`。
+- `feature:<domain>:api` 只暴露跨模块契约：路由/参数、Service 控制接口、URI/权限常量。Compose 页面、Repository 和组件实现留在 impl。
+- `service` 模块只依赖必要的 `:core:*`，禁止依赖 `:feature:*` 或 `:app`。
+- `feature`、`service` 与 `core` 都不得依赖 `app`；app 是组合根，不是业务公共库。
+- `:core:model` 与 `:core:common` 保持纯 Kotlin（无 Android Framework 依赖），便于单元测试与跨域复用。
+- 只有确实需要 Android API、资源或 Manifest 时才使用 Android library plugin；纯领域模型、通用工具与纯接口契约使用纯 Kotlin library plugin。
+- 模块依赖图必须无环。创建跨域调用前先判断能否用 `:core:model` / API 契约或路由边界解决。
 
-## 重要提示（红线）
+## 技术版本策略
 
-1. **单 Activity** —— 新增页面一律用 Navigation Compose，不要建第二个 Activity
-2. **不要在 Screen 里发请求** —— 一律 `Screen → ViewModel → Repository`
-3. **不要用 XML 布局** —— 全 Compose，`res/layout` 下不应有页面布局
-4. **不要混用 View 体系** —— 不生成 `RecyclerView` / `Fragment` / `findViewById`
-5. **Hilt 三件套别漏** —— `@HiltAndroidApp`（Application）、`@AndroidEntryPoint`（Activity）、`@HiltViewModel`（ViewModel）
-6. **用 KSP，不用 kapt** —— 新工程启用 kapt 会直接编译不过（Kotlin 2.x）
-7. **包名三处一致** —— `namespace`、`applicationId`、源码目录路径
-8. **颜色只进 theme** —— 页面里出现 `Color(0xFF...)` 视为不合格
-9. **mock 要像真数据** —— 条目少、字段空，看不出布局问题
-10. **权限按需申请** —— 不要无理由写 `READ_EXTERNAL_STORAGE`、`CAMERA`
-11. **不要臆造业务规则** —— 拿不准的列进「待确认」
-12. **中文注释与文案** —— 与团队习惯一致
+新建项目时，在生成 Gradle 文件之前核实官方发布信息和兼容矩阵，为 AGP、Gradle、JDK、Kotlin、Compose、KSP、Hilt/Room 编译器及实际用到的依赖选择**当前最新的稳定且互相兼容版本组合**。优先查 Android Developers、Kotlin/Gradle 官方文档、Google Maven 和 Maven Central；不使用未经验证的单个“最新版”拼装，也不默认采用 alpha、beta、RC 或实验 API。
 
----
+把本次核实出的具体版本写入生成项目的 `gradle/libs.versions.toml`，让该项目可复现；本技能、配置基线和活动模板不得固化过时版本号。已有工程保留其 wrapper、JDK 和 version catalog，除非用户要求升级。无法访问发布信息时，不猜测或声称最新；可以完成原型分析和模块计划，但暂停新工程 Gradle 配置渲染，直到能核验当前版本。
 
-## 资源文件说明
+依赖集中在 version catalog，模块脚本不直接写版本号。KSP 与 Kotlin/compiler plugin 等有配套要求时按官方兼容规则成组选择，不能只升级其中一项。
 
-```text
-prototype-to-android-native-app/
-├── SKILL.md
-├── README.md
-└── resources/
-    ├── config/
-    │   ├── naming_rules.json          # 命名规则（包、类、文件、路由）
-    │   ├── dependency_baseline.json   # 版本基线（含替代方案）
-    │   └── design_tokens.json         # 颜色 / 间距 / 圆角 / 字号
-    ├── specifications/
-    │   ├── prototype_parser_contract.md  # 原型 → proto_context.json 契约
-    │   ├── architecture_conventions.md   # 分层与 MVI 约定
-    │   └── compose_mapping_rules.md      # Web/原型 → Compose 映射细则
-    ├── templates/
-    │   └── project_structure/         # 可运行骨架（含四个页面范本）
-    ├── tools/
-    │   ├── parse_prototype.py         # HTML → proto_context.json
-    │   ├── preview_plan.py            # 预览生成计划
-    │   ├── render_template.py         # 按 context 渲染骨架（替换占位符/包路径）
-    │   └── validate_project.py        # 21 项工程静态校验
-    ├── demo_input/
-    │   └── index.html                 # 示例原型输入
-    └── demo_output/
-        └── skill-swap-android/        # 示例产物（已通过 21 项校验）
-```
+版本输入文件必须附带 `resolution.checked_at`、`resolution.selection = "latest-stable-compatible"`、`resolution.compatibility_verified = true` 和实际核验的 HTTPS 官方来源；模板 renderer 会拒绝缺失元数据、动态版本、预发布版本或占位值，并把来源写入新工程 README。若不能完成在线核验，不得伪标为 latest-compatible。
+
+## 原型转工程工作流
+
+### 1. 盘点原型和仓库
+
+读取 HTML/CSS、截图、PRD、现有 Gradle 配置和设计资源。抽取页面、业务域、导航关系、用户动作、表单校验、加载/空/错误状态、图片资源、权限需求和视觉 token。
+
+如果工作区已有 Android 工程，先总结当前模块图、构建版本和未提交改动；在其上做最小必要的调整。只有新建工程才套用完整推荐结构。
+
+### 2. 划分业务域与契约
+
+按业务所有权划分 `feature/<domain>`，不是按单个技术层拆 feature。确定采用标准模式（`:feature:<domain>`）还是 API/Impl 拆分模式（`:feature:<domain>:api` + `:feature:<domain>:impl`）。
+
+绘制模块依赖图并核对硬规则。基础视觉 token 与基础控件进入 `core:designsystem`；跨 feature 复用业务 UI 进入 `core:ui`；领域模型进入 `core:model`；平台通用能力进入对应 `core/*`（如 `camera`、`media`、`image`、`sensor`、`storage`、`database`、`data`）；独立系统服务进入 `service/*`。只实例化实际需要的模块，不为结构示例凑空目录。
+
+### 3. 建立构建约定与版本目录
+
+1. 核实当前最新稳定兼容工具链和依赖版本，记录查询来源/日期。
+2. 生成版本 JSON，记录具体版本、核验日期、官方 HTTPS 来源和兼容性确认；在根 `gradle/libs.versions.toml` 集中声明版本，项目生成后固定本次解析结果。
+3. 通过 `build-logic` 的 convention plugins 统一 SDK、JVM/Kotlin、Compose、Feature、DI/KSP、测试、Manifest 和依赖方向约束。
+4. 在 `settings.gradle.kts` 显式 include 所有实际创建的 modules；根脚本只做版本目录、插件和仓库编排。
+5. Included build 如需访问根 version catalog，显式导入根 catalog 并验证路径；不要在 build-logic 另造一套重复版本。
+
+### 4. 实现业务 UI 和数据流
+
+在 `feature/<domain>`（或拆分模式下的 `impl`）中实现该域页面。Composable 只渲染状态和发出动作；ViewModel 维护不可变 UiState 并调用 Repository；Repository 编排该域的数据源（本地优先项目可由 `:core:data` 协调 `:core:database` 与 `:core:storage`）。
+
+覆盖原型主路径和实际适用的加载、空、失败、重试、表单无效及重复提交状态。使用生命周期感知的 Flow 收集；长列表用 LazyColumn/LazyGrid 和稳定 key。按原型还原系统栏 inset、字体缩放、窗口尺寸和深色模式，不把 CSS px 当 dp。
+
+### 5. 接入系统组件与启动
+
+- `Application` 只做轻量进程级装配与必要初始化，不在主线程同步阻塞执行数据库迁移、媒体扫描、网络预热或大型 SDK 初始化。
+- 如需多阶段并发初始化编排，可引入 `:core:startup`（或由 `app` 轻量协程协调）定义无环任务图，首屏非关键任务延迟执行。
+- 全局静态 Receiver、FileProvider 与入口 Activity 放在 `app`；独立系统服务声明在对应 `service/*` 或业务 `feature/*` 的 Manifest。Manifest merge 后的结果是最终校验依据。
+- IPC、长任务 Service、Provider 和敏感权限按需设计，不为了“企业级”堆入无业务价值的组件。
+
+### 6. 校验和交付
+
+运行 `resources/tools/validate_project.py`（自动识别标准单层 `feature/<domain>` 与 `feature/<domain>/{api,impl}` 模式），检查模块依赖、版本目录、包名、Manifest/exported、UI 状态与测试；然后按环境运行 Gradle Sync、受影响模块测试和 app 编译。静态校验不能代替 Gradle 构建。
+
+文本模板未打包 Gradle wrapper 启动脚本和 JAR。环境具备兼容 Gradle 后，生成对应版本的 wrapper，再使用 wrapper 执行构建与测试；不可用时使用 Android Studio 配置的 Gradle 运行，并如实报告。
+
+交付说明模块图、原型实现范围、运行命令和实际验证结果。列出尚未确认的交互、后端契约、权限和未验证的设备行为；不得宣称未运行的构建或真机测试已通过。
+
+## Android 组件与安全边界
+
+- Activity、Service、Receiver、Provider 都明确 owner、进程、生命周期、启动条件及外部可达性。`android:exported` 必须显式声明，默认 `false`；需要外部入口时才最小化开放并校验调用方、参数和权限。
+- Receiver 校验 action 与 extras；动态 Receiver 使用目标 Android 版本要求的 exported 标志并在生命周期结束时注销。Receiver 仅轻量分发，不执行长任务。
+- 可延迟后台工作优先 WorkManager。只有符合 Android 平台政策且用户可感知的持续工作才用前台 Service，不实现无正当理由的保活。
+- Provider 默认 `exported="false"`；对外时限制 authority、URI 路径、读写权限和输入大小。禁止开放任意文件/SQL 能力。早初始化 Provider 明确初始化顺序。
+- 只有确实跨进程才使用 AIDL、Messenger 或受限 Provider。定义版本兼容、超时、断连/重连、取消、权限与错误协议；普通模块调用不包装成 IPC。
+- 权限最小化并按用户动作申请，说明拒绝后的降级路径。密钥和 token 不写日志、不硬编码、不通过 Intent extras 明文跨域传递。
+- monitor 的上下文必须脱敏，不采集 token、消息正文等敏感数据。
+
+## Compose 映射规则
+
+| 原型表达 | Android 实现 | 注意事项 |
+| --- | --- | --- |
+| 垂直/水平布局 | `Column` / `Row` | 用约束适配小屏，不依赖固定像素 |
+| 网格和长列表 | `LazyVerticalGrid` / `LazyColumn` | 提供稳定 key，避免创建全量节点 |
+| 绝对定位 | `Box` + `Modifier.align` | 不用 offset 模拟整页布局 |
+| CSS px / rem | `dp` / `sp` | 字体使用 sp，遵循系统字体缩放 |
+| 图片 | Compose 图片组件 | 提供加载/错误状态和内容描述 |
+| hover / active | 点击、长按、焦点和 Material interaction | 兼顾键盘、触控和无障碍 |
+| CSS transition | `animate*AsState` / `AnimatedVisibility` | 尊重减少动态效果与生命周期 |
+| 页面跳转 | `:app` NavHost 或 `:core:router` 契约 | 参数使用稳定 ID，不传整个业务对象 |
+| CSS 颜色/token | `core:designsystem` 语义 token | feature 页面不散落硬编码色值 |
+
+交互控件提供语义标签、触控反馈、合适的触控目标，以及明确的禁用/处理中状态。系统返回、进程重建、字体放大、深色模式和窗口尺寸变化都属于原生还原的一部分。
+
+## 建议验证清单
+
+- Gradle Sync、依赖解析、受影响 module 编译和 app 实际 build variant。
+- `core` 无 feature 依赖；feature impl 不依赖其他 impl；API 不泄漏实现类型；依赖图无环。
+- version catalog 版本均已核实且兼容，模块脚本没有散落版本号。
+- Manifest merger report 无意外导出组件、权限、authority 冲突或重复 intent filter。
+- startup DAG 无环；关键路径有界，非首屏任务不阻塞首帧。
+- 路由参数、进程重建、返回栈、Receiver 重复触发、Provider 非法 URI、Service 断连行为有测试或明确验证。
+- UI 覆盖原型关键页面及主要状态；ViewModel/Repository 有单测，组件边界有适用的集成测试。
+- 只报告实际运行的命令和结果；未执行的设备、变体或真机测试明确标为未验证。

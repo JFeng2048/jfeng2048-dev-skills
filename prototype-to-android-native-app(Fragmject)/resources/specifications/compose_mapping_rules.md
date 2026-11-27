@@ -1,134 +1,72 @@
-# 原型 → Compose 映射规则
+# 原型到 Jetpack Compose 映射
 
-原型（HTML/CSS 或设计稿）与 Compose 不是一一对应关系。本文给出**确定性映射**，避免每次生成风格漂移。
+原型（HTML/CSS、设计稿或 PRD）与 Compose 不是一一对应关系。保留用户体验意图，并采用原生布局、状态、导航与无障碍语义。
 
-## 1. 布局容器
+## 1. 布局与尺寸
 
 | 原型 | Compose | 备注 |
 | --- | --- | --- |
-| `display: block` 纵向堆叠 | `Column` | 默认 `verticalArrangement = Arrangement.spacedBy(Dimens.sm)` |
-| `display: flex; flex-direction: row` | `Row` | 对齐用 `verticalAlignment = Alignment.CenterVertically` |
-| 层叠 / 绝对定位 | `Box` + `Modifier.align(Alignment.Xxx)` | 禁止用 `offset` 模拟定位 |
-| `display: grid`（等宽卡片） | `LazyVerticalGrid(columns = GridCells.Fixed(n))` | 条目多时用 `Adaptive(minSize)` |
-| `overflow: scroll` 长列表 | `LazyColumn` + `items(key)` | 必须给 key，避免复用错乱 |
-| 整页滚动 | `Column(Modifier.verticalScroll(rememberScrollState()))` | 详情页常用 |
-| 吸顶头部 | `LazyColumn { stickyHeader { ... } }` | 需 `@OptIn(ExperimentalFoundationApi::class)` |
-| 底部固定按钮 | `Scaffold(bottomBar = { ... })` | 用 `innerPadding`，不要自己加 padding |
-| 顶部标题栏 | `Scaffold(topBar = { AppTopBar(title) })` | 统一走 `core/designsystem/component` |
+| 纵向/横向排列 | `Column` / `Row` | 用约束、权重和窗口尺寸适配，不依赖固定像素 |
+| 层叠布局 | `Box` + `Modifier.align` | `offset` 只用于视觉微调，不模拟整页绝对布局 |
+| 等宽网格 | `LazyVerticalGrid` | 多条目列表使用 lazy 容器 |
+| 长列表 | `LazyColumn` + 稳定 `key` | 避免 `Column` 一次性创建全部条目 |
+| 整页滚动 | `verticalScroll` 或 `LazyColumn` | 按内容长度和交互选择 |
+| 吸顶头部 | `stickyHeader` | 使用前核对当前 Compose API 稳定性 |
+| 固定底部操作 | `Scaffold(bottomBar = ...)` | 正确消费 `innerPadding` 与系统 inset |
+| CSS px / rem | `dp` / `sp` | 字体使用 `sp` 并支持系统字体缩放 |
+
+间距、颜色、字体和形状优先映射到 `core:designsystem` 的语义 token。不要在 feature 页面散落魔法值；组件只在语义清楚且复用有价值时抽取。
 
 ## 2. 视觉样式
 
 | CSS | Compose |
 | --- | --- |
-| `background-color` | `Modifier.background(color)` 或 `Surface(color = ...)` |
-| `border: 1px solid X` | `Modifier.border(1.dp, color, shape)` |
-| `border-radius` | `RoundedCornerShape(Dimens.cardRadius)` |
-| `box-shadow: 0 2px 8px` | `Card(elevation = CardDefaults.cardElevation(1.dp))` |
-| `linear-gradient(...)` | `Brush.linearGradient(listOf(a, b))` + `Modifier.background(brush)` |
-| `opacity` | `Modifier.alpha(x)` 或颜色的 alpha 通道 |
-| `font-weight: 600` | `FontWeight.SemiBold` |
-| `font-size: 14px` | `MaterialTheme.typography.bodyMedium`（14sp） |
-| 固定行高 | `lineHeight = 20.sp` |
-| `text-overflow: ellipsis` | `maxLines = 1, overflow = TextOverflow.Ellipsis` |
-| 多行省略 | `maxLines = 2, overflow = TextOverflow.Ellipsis` |
-| `padding: 16px` | `Modifier.padding(16.dp)` → 用 `Dimens.lg` |
-| `margin-top: 8px` | `Spacer(Modifier.height(8.dp))` 或 `Arrangement.spacedBy` |
+| `background-color` | `Modifier.background` / `Surface` |
+| `border` | `Modifier.border` |
+| `border-radius` | `RoundedCornerShape` + 设计 token |
+| `box-shadow` | `Card` / `Surface` 的 Material elevation |
+| `linear-gradient` | `Brush.linearGradient` |
+| `opacity` | `Modifier.alpha` 或颜色 alpha |
+| `font-weight` | `FontWeight` |
+| 文本省略 | `maxLines` + `TextOverflow.Ellipsis` |
+| 固定内外边距 | `core:designsystem` spacing token |
 
-**禁止**：在 `feature/` 下出现 `Color(0xFF...)`、`16.dp` 这类魔法值（统一 `Dimens` / `MaterialTheme`）。
+不必为了追求像素级复刻而引入多层阴影、硬编码绝对坐标或不可访问的颜色对比。需要近似效果时记录差异及理由。
 
-## 3. 控件
+## 3. 控件和交互
 
-| 原型 | Compose |
-| --- | --- |
-| `<button>` | `Button` / `OutlinedButton` / `TextButton` |
-| 卡片列表项 | `Card(onClick = ...)` 或 `Surface(onClick = ...)` |
-| `<input>` | `OutlinedTextField` + `KeyboardOptions` + `isError` |
-| `<textarea>` | `OutlinedTextField(minLines = 4)` |
-| `<select>` | `ExposedDropdownMenuBox` |
-| `<img>` | `AsyncImage(model = url, contentDescription = ..., placeholder = ..., error = ...)` |
-| 头像 | `AsyncImage` + `Modifier.clip(CircleShape))` |
-| 标签 | `AssistChip` / `SuggestionChip` |
-| 分割线 | `HorizontalDivider()` |
-| 徽标数字 | `BadgedBox` + `Badge` |
-| Loading | `CircularProgressIndicator()` |
-| Toast | `Toast.makeText(context, ..., Toast.LENGTH_SHORT).show()` |
-| 确认弹窗 | `AlertDialog` |
-| 权限请求 | 按需生成：`rememberLauncherForActivityResult(RequestPermission())` 或 Accompanist |
+| 原型 | Compose | 注意事项 |
+| --- | --- | --- |
+| 按钮 | `Button` / `OutlinedButton` / `TextButton` | 反馈 loading、disabled 与提交结果 |
+| 输入框 | `OutlinedTextField` | 设置键盘类型、错误与辅助文案 |
+| 下拉选择 | `ExposedDropdownMenuBox` 或产品合适控件 | 支持键盘与无障碍 |
+| 图片 | 项目选定的图片加载器 | 占位、失败回退、内容描述齐全 |
+| 标签 | Material chip 或设计系统组件 | 长文本与窄屏测试 |
+| Loading | `CircularProgressIndicator` 或骨架屏 | 不遮挡已有可读数据 |
+| Toast/提示 | Snackbar 或项目统一反馈组件 | 一次性事件不要用可重复布尔状态 |
+| 确认弹窗 | `AlertDialog` | 破坏性动作需明确主次操作 |
+| 权限 | Activity Result API / 项目权限封装 | 用户动作触发，拒绝后有降级 |
 
-## 4. 页面范式（模板已内置）
+## 4. 页面状态与业务域
 
-### 列表页（参照 `feature/home`）
+页面由所属 `feature:<domain>:impl` 提供，路由契约由其 `api` 描述，导航协议由 `core:router` 提供。不要再把所有路由硬编码到 core 的 feature 引用表中。
 
-```text
-Scaffold(topBar = AppTopBar(title, actions))
-└── Box(fillMaxSize)
-    ├── isLoading               → LoadingView()
-    ├── error != null && empty  → ErrorView(message, onRetry)
-    ├── empty                   → EmptyView("暂无数据")
-    └── LazyColumn
-        ├── items(list, key = id) → Card 条目
-        └── footer: loadingMore / 触底加载 / 没有更多了
-```
+每个取数页面按实际用例处理 loading、空、失败、重试、刷新和已有数据时的失败状态。列表页使用稳定 key 和有界分页；避免在每次重组时触发请求。Composable 展示状态并向上回传用户动作，ViewModel/Repository 边界按架构约定执行。
 
-**触底加载**：footer 里 `if (hasMore) LaunchedEffect(list.size) { onLoadMore() }`，不要监听滚动偏移量。
+## 5. 图片与资源
 
-### 详情页（参照 `feature/detail`）
+- 图片失败时提供占位/错误状态和有意义的 content description。
+- 优先复用项目已有图标库；不因单个图标增加整套大体积依赖。
+- 自定义矢量资源放在所属 Android module 的 `res/drawable`。
+- 原型远程图可能失效；生成工程应使用确定可访问的资源或明确的本地占位，不假装网络资源验证成功。
 
-```text
-Scaffold(topBar = AppTopBar(title, onBack), bottomBar = { Button("联系TA") })
-└── Column(verticalScroll)
-    ├── 头图 / 标题 / 作者行
-    ├── 标签行 (FlowRow)
-    └── 正文段落
-```
+## 6. 屏幕与系统适配
 
-### 表单页（参照 `feature/login`）
+- 页面正确处理状态栏、导航栏、键盘与 edge-to-edge inset。
+- 至少核对原型目标手机宽度和窄屏；平板/折叠屏按业务布局使用窗口尺寸类别。
+- 支持字体缩放、深色模式、横竖屏和进程重建中与该页面相关的状态。
+- 控件提供语义、焦点、触控反馈与合适的目标尺寸；减少动态效果偏好按需处理。
 
-```text
-Column(padding = Dimens.lg)
-├── OutlinedTextField（label + isError + supportingText）
-├── 错误提示（红色 bodySmall）
-└── Button(enabled = canSubmit, onClick = submit)
-```
+## 7. 无法直接映射时
 
-### 个人中心（参照 `feature/mine`）
-
-```text
-Column
-├── 头部：头像 + 昵称 + 简介
-├── 设置组：ListTile 风格行（图标 + 标题 + 右箭头）
-└── 退出登录按钮
-```
-
-## 5. 交互映射
-
-| 原型 | Compose |
-| --- | --- |
-| `onclick` 跳转 | `onClick: () -> Unit` 回传给 Screen 上层，由 `NavController` 处理 |
-| 下拉刷新 | `PullToRefreshBox`（M3 实验 API）或顶部刷新按钮（模板默认） |
-| 上拉加载 | footer `LaunchedEffect` |
-| 表单校验 | ViewModel 校验，`UiState.canSubmit` 控制按钮 |
-| 键盘遮挡 | `Modifier.imePadding()` + `Scaffold` |
-| 返回键 | `BackHandler`（仅拦截二次确认场景） |
-
-## 6. 图片与资源
-
-- 原型里的远程图片可能失效：**必须** 提供 `placeholder` 与 `error`
-- 本地图标优先用 `androidx.compose.material.icons.Icons.Default.*`，避免引入额外图标库
-- 需要自定义矢量图时放 `res/drawable/ic_xxx.xml`，用 `painterResource`
-- 大图不要塞 `res/`，走网络 + Coil 缓存
-
-## 7. 屏幕适配
-
-- 尺寸一律 `dp` / `sp`，不写像素
-- 默认按 360dp 宽度设计，列表项用 `fillMaxWidth()` 自适应
-- 平板 / 折叠屏：按需生成 `WindowSizeClass`，`Expanded` 时列表与详情双栏
-- 状态栏沉浸：`enableEdgeToEdge()` + `Scaffold` 的 `innerPadding`
-
-## 8. 无法映射时
-
-不臆造。做法固定：
-
-1. 用最接近的 Material3 组件还原
-2. 在文件头注释写 `// TODO: 原型使用 XXX，当前用 YYY 近似实现`
-3. 把差异列入输出的「⚠️ 待确认」
+不臆造。选最接近的原生交互，记录 TODO 说明原型与实现的差异，并把产品行为差异列入待确认项。

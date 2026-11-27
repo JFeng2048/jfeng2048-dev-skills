@@ -1,149 +1,114 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-"""根据 proto_context.json 预览将要生成的 Android 工程文件计划。
-
-用法：
-    python preview_plan.py <proto_context.json>
-"""
+"""预览多模块 Android 工程模板和 feature 展开计划。"""
 
 from __future__ import annotations
 
 import json
+import re
 import sys
+from datetime import date
 from pathlib import Path
 
-BASE_FILES = [
-    "settings.gradle.kts",
-    "build.gradle.kts",
-    "gradle.properties",
-    "gradle/libs.versions.toml",
-    "gradle/wrapper/gradle-wrapper.properties",
-    "local.properties.example",
-    ".gitignore",
-    "README.md",
-    "app/build.gradle.kts",
-    "app/proguard-rules.pro",
-    "app/src/main/AndroidManifest.xml",
-    "app/src/main/res/values/strings.xml",
-    "app/src/main/res/values/themes.xml",
-]
-
-CORE_FILES = [
-    "App.kt",
-    "MainActivity.kt",
-    "core/common/ResultExt.kt",
-    "core/config/AppConfig.kt",
-    "core/datastore/TokenStore.kt",
-    "core/designsystem/theme/Color.kt",
-    "core/designsystem/theme/Type.kt",
-    "core/designsystem/theme/Theme.kt",
-    "core/designsystem/theme/Dimens.kt",
-    "core/designsystem/component/AppTopBar.kt",
-    "core/designsystem/component/StateViews.kt",
-    "core/navigation/Routes.kt",
-    "core/navigation/AppNavHost.kt",
-]
-
-DATA_FILES = [
-    "data/model/Item.kt",
-    "data/remote/ItemApi.kt",
-    "data/remote/dto/ApiResponse.kt",
-    "data/remote/dto/ItemDto.kt",
-    "data/local/AppDatabase.kt",
-    "data/local/dao/ItemDao.kt",
-    "data/local/entity/ItemEntity.kt",
-    "data/mock/MockData.kt",
-    "data/repository/ItemRepository.kt",
-]
+TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates" / "modular_project_structure"
 
 
-def to_pascal(name):
-    """kebab / snake -> PascalCase"""
-    return "".join(part[:1].upper() + part[1:] for part in name.replace("_", "-").split("-") if part)
+def pascal(name):
+    return "".join(part[:1].upper() + part[1:] for part in re.split(r"[-_\s]", name) if part)
+
+
+def normalized_features(ctx):
+    features = ctx.get("features") or []
+    pages = ctx.get("pages", [])
+    if not features:
+        domains = sorted({page.get("domain", "main") for page in pages})
+        features = [{"domain": domain, "pages": []} for domain in domains or ["main"]]
+    by_domain = {feature["domain"]: dict(feature) for feature in features if feature.get("domain")}
+    for feature in by_domain.values():
+        feature["pages"] = list(feature.get("pages", []))
+    for page in pages:
+        domain = page.get("domain", "main")
+        feature = by_domain.setdefault(domain, {"domain": domain, "pages": []})
+        if page.get("page_name") and page["page_name"] not in feature["pages"]:
+            feature["pages"].append(page["page_name"])
+    return list(by_domain.values())
 
 
 def build_plan(ctx):
-    project = ctx.get("project", {})
-    pages = ctx.get("pages", [])
-    package_path = project.get("package_name", "com.example.app").replace(".", "/")
-    root = "app/src/main/java/%s/" % package_path
-
-    files = list(BASE_FILES)
-    files += [root + f for f in CORE_FILES]
-    files += [root + f for f in DATA_FILES]
-    files += [
-        root + "di/NetworkModule.kt",
-        root + "di/DatabaseModule.kt",
-        root + "di/RepositoryModule.kt",
-        root + "feature/root/RootViewModel.kt",
-        root + "feature/root/SplashScreen.kt",
-    ]
-
-    for page in pages:
-        feature = page.get("page_name", "page")
-        screen = page.get("screen_class") or (to_pascal(feature) + "Screen")
-        viewmodel = page.get("viewmodel_class") or (to_pascal(feature) + "ViewModel")
-        state_base = viewmodel[:-len("ViewModel")] if viewmodel.endswith("ViewModel") else viewmodel
-        files.append(root + "feature/%s/%s.kt" % (feature, screen))
-        files.append(root + "feature/%s/%s.kt" % (feature, viewmodel))
-        files.append(root + "feature/%s/%sUiState.kt" % (feature, state_base))
-        if page.get("layout") == "list":
-            files.append(root + "feature/%s/components/ItemCard.kt" % feature)
-
-    files.append("app/src/test/java/%s/MockDataTest.kt" % package_path)
-    return package_path, files
+    package_path = ctx.get("project", {}).get("package_name", "com.example.app").replace(".", "/")
+    features = normalized_features(ctx)
+    planned = []
+    for path in sorted(TEMPLATE_DIR.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(TEMPLATE_DIR).as_posix()
+        if "/feature/{{domain}}/" in "/" + rel:
+            for feature in features:
+                expanded = rel.replace("{{domain}}", feature["domain"])
+                expanded = expanded.replace("{{domain_pascal}}", pascal(feature["domain"]))
+                expanded = expanded.replace("{{package_path}}", package_path)
+                planned.append(expanded)
+        else:
+            planned.append(rel.replace("{{package_path}}", package_path))
+    return package_path, features, planned
 
 
 def main():
     if len(sys.argv) < 2:
         print("用法: python preview_plan.py <proto_context.json>")
         return 1
-
-    path = Path(sys.argv[1])
-    if not path.exists():
-        print("错误：文件不存在 %s" % path)
+    context_path = Path(sys.argv[1])
+    if not context_path.exists():
+        print("错误：文件不存在 %s" % context_path)
+        return 2
+    if not TEMPLATE_DIR.is_dir():
+        print("错误：多模块模板目录不存在 %s" % TEMPLATE_DIR)
         return 2
 
-    ctx = json.loads(path.read_text(encoding="utf-8"))
+    ctx = json.loads(context_path.read_text(encoding="utf-8"))
     project = ctx.get("project", {})
-    pages = ctx.get("pages", [])
-    package_path, plan = build_plan(ctx)
-
+    package_path, features, files = build_plan(ctx)
     print("工程名：%s" % project.get("project_name", ""))
-    print("应用标题：%s" % project.get("app_title", ""))
     print("包名：%s（目录：%s）" % (project.get("package_name", ""), package_path))
-    print("minSdk / targetSdk：%s / %s" % (project.get("min_sdk", ""), project.get("target_sdk", "")))
-    print("主色：#%s" % ctx.get("design", {}).get("primary_color", ""))
-    print("页面数：%d" % len(pages))
-    print("计划文件数：%d" % len(plan))
-    print()
+    print("业务域：%s" % (", ".join(feature["domain"] for feature in features) or "待确认"))
+    print("页面数：%d" % len(ctx.get("pages", [])))
+    print("计划文件数：%d" % len(files))
+    print("SDK：min=%s / target=%s / compile=%s / JDK=%s" % (
+        project.get("min_sdk"), project.get("target_sdk"),
+        project.get("compile_sdk"), project.get("jdk"),
+    ))
+    resolution = project.get("version_resolution", {})
+    if (
+        not project.get("versions")
+        or resolution.get("selection") != "latest-stable-compatible"
+        or resolution.get("compatibility_verified") is not True
+        or resolution.get("checked_at") != date.today().isoformat()
+        or not resolution.get("sources")
+    ):
+        print("⚠️ 缺少今天核验的最新稳定兼容版本元数据；renderer 会拒绝生成 Gradle 配置。")
 
-    print("页面清单：")
-    for p in pages:
-        print("  - %-14s %-10s route=%s  screen=%s" % (
-            p.get("page_name", ""),
-            p.get("layout", ""),
-            p.get("route", ""),
-            p.get("screen_class", ""),
+    print("\n模块图：")
+    print("  :app")
+    for module in (
+        "common", "component-runtime", "designsystem", "ipc",
+        "monitor", "network", "router", "startup", "storage",
+    ):
+        print("  :core:%s" % module)
+    for feature in features:
+        print("  :feature:%s:api" % feature["domain"])
+        print("  :feature:%s:impl -> :feature:%s:api" % (
+            feature["domain"], feature["domain"],
         ))
-        if p.get("components"):
-            print("      组件 %s" % ", ".join(p["components"]))
-        if p.get("data_fields"):
-            print("      字段 %s" % ", ".join(p["data_fields"]))
-    print()
 
-    print("计划生成文件：")
-    for f in plan:
-        print("  - %s" % f)
-
-    diag = ctx.get("diagnostics", {})
-    if diag.get("need_confirm"):
-        print()
-        print("待确认项：")
-        for n in diag["need_confirm"]:
-            print("  - %s" % n)
-
+    diagnostics = ctx.get("diagnostics", {})
+    if diagnostics.get("need_confirm"):
+        print("\n待确认项：")
+        for item in diagnostics["need_confirm"]:
+            print("  - %s" % item)
+    print("\n文件计划：")
+    for file_path in files:
+        print("  - %s" % file_path)
     return 0
 
 

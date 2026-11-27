@@ -1,74 +1,82 @@
 {
-  "$comment": "命名规则：生成 Android 工程时按此表命名，禁止自创风格",
+  "$comment": "命名与目录约定：按业务域组织 Android Gradle modules，支持标准单层 feature/<domain> 与按需拆分的 feature/<domain>/{api,impl}，以及独立的 service/<name>。",
   "package_name": {
-    "rule": "全小写、点分、每段以字母开头，禁止连字符与下划线",
+    "rule": "全小写点分，每段以字母开头；feature 名使用小写 kebab-case",
     "regex": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9_]*)+$",
     "example": "com.example.skillswap",
     "bad_examples": ["com.Example.SkillSwap", "com.example.skill-swap", "com.123.app"]
   },
-  "package_path": {
-    "rule": "包名中的点替换为目录分隔符，源码目录必须与包名完全一致",
-    "example": "com/example/skillswap"
+  "module_names": {
+    "app": ":app",
+    "core": ":core:<capability>",
+    "feature": ":feature:<domain>",
+    "feature_api": ":feature:<domain>:api",
+    "feature_impl": ":feature:<domain>:impl",
+    "service": ":service:<name>",
+    "rule": "模块名按业务域和职责命名；禁止 :core 依赖任何 :feature 或 :service，禁止 :feature 之间互相依赖，禁止 :service 依赖 :feature 或 :app"
   },
   "source_dir": {
-    "rule": "使用 java 目录存放 Kotlin 源码（AGP 默认约定），不要额外配 sourceSets",
-    "example": "app/src/main/java/{{package_path}}"
+    "rule": "按 module 单独放源码，Kotlin 默认使用 src/main/kotlin；遵循项目既有 sourceSets 约定",
+    "app_example": "app/src/main/kotlin/{{package_path}}/app",
+    "feature_example": "feature/{{domain}}/src/main/kotlin/{{package_path}}/feature/{{domain}}",
+    "feature_impl_example": "feature/{{domain}}/impl/src/main/kotlin/{{package_path}}/feature/{{domain}}/impl",
+    "feature_api_example": "feature/{{domain}}/api/src/main/kotlin/{{package_path}}/feature/{{domain}}/api",
+    "service_example": "service/{{name}}/src/main/kotlin/{{package_path}}/service/{{name}}"
   },
   "file_naming": {
     "activity": "{PascalCase}Activity.kt",
-    "application": "App.kt",
+    "application": "MainApplication.kt",
     "screen": "{Feature}Screen.kt",
     "viewmodel": "{Feature}ViewModel.kt",
     "uistate": "{Feature}UiState.kt",
     "event": "{Feature}Event.kt（与 UiState 同文件或独立）",
     "repository_interface": "{Domain}Repository.kt",
-    "repository_impl": "{Domain}RepositoryImpl.kt（可与接口同文件）",
-    "api": "{Domain}Api.kt",
-    "dto": "{Domain}Dto.kt",
+    "repository_impl": "{Domain}RepositoryImpl.kt",
+    "api_contract": "{Domain}FeatureApi.kt 或有明确业务语义的接口名",
+    "api_dto": "{Domain}Dto.kt（仅当该 DTO 确实跨模块）",
     "entity": "{Domain}Entity.kt",
     "dao": "{Domain}Dao.kt",
-    "hilt_module": "{Layer}Module.kt"
+    "convention_plugin": "{Role}ConventionPlugin.kt 或 Gradle 预编译插件脚本"
+  },
+  "ownership": {
+    "feature_api": "路由参数、对外控制接口、URI/权限常量等稳定跨模块契约",
+    "feature_impl": "Composable、ViewModel、业务规则、Repository、DTO、Entity、DAO 和业务组件实现",
+    "core": "平台通用能力与共享设计系统；不得包含具体业务模型",
+    "app": "组合根、Application、宿主 Activity、全局静态组件和初始化编排"
   },
   "class_naming": {
-    "activity": "PascalCase + Activity 后缀，如 MainActivity",
+    "activity": "PascalCase + Activity 后缀，如 SplashOrShellActivity",
+    "application": "MainApplication",
     "composable": "PascalCase，页面入口以 Screen 结尾，如 HomeScreen",
     "viewmodel": "PascalCase + ViewModel，如 HomeViewModel",
     "uistate": "不可变 data class，如 HomeUiState",
     "event": "sealed interface，如 HomeEvent",
     "repository": "接口 {Domain}Repository，实现 {Domain}RepositoryImpl",
-    "dto": "PascalCase + Dto，与后端字段一一对应",
-    "entity": "PascalCase + Entity，与 Room 表一一对应",
-    "constant": "const val 全大写下划线，如 PAGE_SIZE",
-    "theme_token": "PascalCase 颜色名，如 Primary / OnPrimary"
+    "entity": "PascalCase + Entity，与业务域表所有权一致",
+    "constant": "const val 全大写下划线，如 ARG_ORDER_ID",
+    "theme_token": "PascalCase 语义名，如 Primary / OnPrimary"
   },
   "kotlin_style": {
-    "compose": "Composable 函数名 PascalCase、无返回值；不要以 get/set 开头",
-    "modifier_param": "每个可复用 Composable 第一个可选参数为 modifier: Modifier = Modifier",
-    "state_holder": "内部状态用 rememberSaveable，跨页面配置变更存活",
-    "visibility": "仅页面入口 public，内部块 private",
-    "trailing_lambda": "最后一个参数为 content 时应使用尾随 lambda"
+    "compose": "Composable 函数名 PascalCase；页面入口清晰，纯展示组件优先无副作用",
+    "modifier_param": "可复用 Composable 第一个可选参数为 modifier: Modifier = Modifier",
+    "state_holder": "临时 UI 状态使用 remember/rememberSaveable，业务状态放 ViewModel",
+    "visibility": "API module 仅公开跨模块契约；impl 内部实现尽量 internal/private",
+    "trailing_lambda": "最后一个参数为 content 时使用尾随 lambda"
   },
   "routes": {
-    "rule": "集中放在 core/navigation/Routes.kt，常量全大写；带参数路由同时提供构造函数",
-    "examples": {
-      "HOME": "home",
-      "MINE": "mine",
-      "LOGIN": "login",
-      "DETAIL": "detail/{skillId}",
-      "detail_factory": "fun detail(skillId: String) = \"detail/$skillId\""
-    }
-  },
-  "resource_naming": {
-    "strings": "snake_case，如 app_name",
-    "themes": "Theme.App（保持唯一）",
-    "drawable": "ic_{name}.xml（vector）"
+    "rule": "core:router 定义平台无关的路由协议；feature:<domain>:api 定义业务路由/参数契约，impl 注册页面",
+    "forbidden": "feature 间硬编码 Activity 类名、Composable 实现类或其他 feature 的 impl 包路径"
   },
   "forbidden": [
-    "Activity 里写业务逻辑",
-    "Screen 里直接调用 Retrofit / OkHttp / Api 接口",
-    "ViewModel 持有 Context 或使用 Android UI 类",
-    "在 feature 包里写 Color(0xFFxxxxxx) 硬编码颜色",
-    "同一功能同时存在 Compose 与 XML 两套页面",
-    "用 kapt 处理 Hilt / Room（Kotlin 2.x 必须 KSP）"
+    "core 模块依赖任何 feature 或 service 模块",
+    "service 模块依赖任何 feature 或 app 模块",
+    "标准模式下 feature 模块依赖其他 feature 模块",
+    "feature impl 依赖其他 feature impl",
+    "feature 或 core 依赖 app",
+    "API module 暴露 Compose 页面、Repository 实现或数据库实现",
+    "在 feature UI 中硬编码颜色",
+    "对外 Android 组件省略 android:exported 或默认开放",
+    "使用动态依赖版本 '+' 或 latest.release 固化到生成工程",
+    "为不需要的场景默认添加 IPC、Service、Receiver、Provider 或危险权限"
   ]
 }
